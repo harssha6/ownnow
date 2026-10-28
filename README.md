@@ -12,6 +12,12 @@ ownnow publish ./my-site
 # -> https://now.example.com/bright-canvas-a7k2/
 ```
 
+![ownnow demo](assets/demo.gif)
+
+**Install the binary** (no Go toolchain needed): grab `ownnow` for your
+platform from the [latest release](https://github.com/harssha6/ownnow/releases),
+or `go install` / build from source below.
+
 ![status](https://img.shields.io/badge/license-MIT-green) — static sites,
 images, PDFs, Wasm apps, any file type.
 
