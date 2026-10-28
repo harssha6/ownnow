@@ -4,8 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ownnow · Self-hosted publishing on your own domain</title>
-<meta name="description" content="Publish a file or folder and get a live URL on your own domain and storage. ownnow is an open-source, self-hosted here.now: one Go binary, MIT licensed.">
+<meta name="description" content="Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.">
 <link rel="canonical" href="https://ownnow.dev/">
+<meta name="author" content="Harssha Vardan">
 <meta name="theme-color" content="#f2ede3">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
@@ -15,14 +16,14 @@
 <meta property="og:site_name" content="ownnow">
 <meta property="og:url" content="https://ownnow.dev/">
 <meta property="og:title" content="ownnow · Your agent ships it. You own the link.">
-<meta property="og:description" content="Publish a file or folder and get a live URL on your own domain and storage. ownnow is an open-source, self-hosted here.now: one Go binary, MIT licensed.">
+<meta property="og:description" content="Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.">
 <meta property="og:image" content="https://ownnow.dev/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ownnow: Your agent ships it. You own the link. A grid of bold geometric tiles.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ownnow · Your agent ships it. You own the link.">
-<meta name="twitter:description" content="Publish a file or folder and get a live URL on your own domain and storage. ownnow is an open-source, self-hosted here.now: one Go binary, MIT licensed.">
+<meta name="twitter:description" content="Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.">
 <meta name="twitter:image" content="https://ownnow.dev/og.png">
 <script type="application/ld+json">
 {
@@ -30,7 +31,7 @@
   "@type": "SoftwareApplication",
   "name": "ownnow",
   "url": "https://ownnow.dev/",
-  "description": "Publish a file or folder and get a live URL on your own domain and storage. ownnow is an open-source, self-hosted here.now: one Go binary, MIT licensed.",
+  "description": "Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.",
   "image": "https://ownnow.dev/og.png",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS, Windows",
@@ -38,7 +39,80 @@
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "downloadUrl": "https://github.com/harssha6/ownnow/releases",
+  "author": { "@type": "Person", "name": "Harssha Vardan", "url": "https://harssha.design", "sameAs": ["https://x.com/Harsshavardan3", "https://github.com/harssha6", "https://www.linkedin.com/in/harssha-vardan-a031371a4/"] },
   "sameAs": ["https://github.com/harssha6/ownnow"]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is ownnow?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "ownnow publishes a file or folder to a live URL on your own domain. It is one Go binary that runs on your server and keeps files in your storage. It is open source under the MIT license."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is it different from here.now?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "here.now is a hosted service. ownnow is software you run yourself, with no accounts, no hosted control plane, and no telemetry. Some here.now features, like email allowlists, analytics, and teams, are not built yet."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can my AI agent publish to it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. The repo ships an agent skill for Claude, Cursor, and other agents. Set OWNNOW_SERVER and OWNNOW_API_KEY, then tell your agent “publish this”."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does it cost to run?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The software is free. You pay for your own server and bandwidth. On Cloudflare, R2 has no egress fees and the serving Worker fits the free tier."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What can I publish?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Static files: HTML sites, images, PDFs, and any other file type. Single-page apps, custom 404 pages, and Wasm games work. ownnow does not run server-side code."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need my own domain?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "For public sites, yes. Point an A record at your server and Caddy handles TLS. Add wildcard DNS to give every site its own subdomain. For local work, the single binary runs on localhost."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do updates and rollbacks work?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Publish again with the same slug to create a new version. Every version is kept, so a rollback switches back to an old one without uploading anything."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Who can publish to my server?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Anyone with your API key, and no one else. Without a key, the server runs in anonymous mode: sites expire after 24 hours and a claim token guards updates."
+      }
+    }
+  ]
 }
 </script>
 <link rel="preload" href="assets/fonts/zalando-sans-expanded.woff2" as="font" type="font/woff2" crossorigin>
@@ -79,10 +153,10 @@
   .bar{display:flex; align-items:center; justify-content:space-between; height:72px}
   .brand{font:600 1.05rem/1 var(--display); letter-spacing:-.02em; text-decoration:none; display:flex; align-items:center; gap:.5rem}
   .brand svg{width:22px; height:22px}
-  nav{display:flex; gap:1.75rem}
-  nav a{font-weight:500; font-size:.92rem; text-decoration:none}
-  nav a:hover{text-decoration:underline; text-underline-offset:4px; text-decoration-thickness:2px}
-  @media (max-width:820px){ header{position:static} nav a:not(:last-child){display:none} }
+  header nav{display:flex; gap:1.75rem}
+  header nav a{font-weight:500; font-size:.92rem; text-decoration:none}
+  header nav a:hover{text-decoration:underline; text-underline-offset:4px; text-decoration-thickness:2px}
+  @media (max-width:820px){ header{position:static} header nav a:not(:last-child){display:none} }
 
   /* buttons */
   .actions{display:flex; flex-wrap:wrap; align-items:center; gap:.75rem}
@@ -107,13 +181,15 @@
   .tile svg{width:100%; height:100%; transition:transform .75s var(--turn)}
   .tile.in{animation:pop .7s var(--turn) both; animation-delay:calc(var(--i) * 70ms + 150ms)}
   @keyframes pop{from{transform:scale(.4) rotate(-90deg); opacity:0}}
-  .tile.core{background:var(--paper); display:grid; place-items:center}
-  .core i{width:64%; aspect-ratio:1; background:var(--blue); transform:rotate(45deg) scale(.82); transition:border-radius .9s var(--turn), transform .9s var(--turn), background .4s}
-  .core.live i{border-radius:50%; transform:none}
-  .core.bump i{transform:scale(.9)}
+  .stage{position:relative}
+  .demo{position:absolute; left:-10%; top:50%; width:92%; margin:0; border:2px solid var(--ink); border-radius:14px; overflow:hidden; background:var(--ink); box-shadow:12px 12px 0 var(--ink); transform:translateY(-50%) rotate(-2deg); animation:drop .9s var(--turn) .7s both}
+  .demo video{display:block; width:100%; height:auto; aspect-ratio:1120 / 700}
+  @keyframes drop{from{opacity:0; transform:translateY(-38%) rotate(-6deg) scale(.94)}}
   @media (max-width:820px){
     .hero{grid-template-columns:1fr; padding-top:0; min-height:0; gap:0}
-    .art{order:-1; --t:calc(100vw / 3); grid-template-columns:repeat(3, 1fr)}
+    .stage{order:-1}
+    .art{--t:calc(100vw / 3); grid-template-columns:repeat(3, 1fr)}
+    .demo{left:6%; width:88%; box-shadow:8px 8px 0 var(--ink)}
     .art .tile:nth-child(n+7){display:none}
     .hero-copy{padding-inline:var(--gutter); padding-block:2.5rem 3rem}
   }
@@ -219,6 +295,21 @@
     .feature:nth-child(even){padding-left:0; border-left:0}
   }
 
+  /* faq */
+  #faq{padding-top:0}
+  #faq h2 em{color:var(--blue)}
+  .faq{border-top:2px solid var(--ink); max-width:62rem; margin-left:auto}
+  .qa{border-bottom:1px solid var(--line)}
+  .qa summary{list-style:none; display:flex; justify-content:space-between; align-items:center; gap:1.5rem; padding:1.35rem 0; cursor:pointer; font:600 clamp(1.05rem, 1.6vw, 1.3rem)/1.3 var(--display); letter-spacing:-.02em}
+  .qa summary::-webkit-details-marker{display:none}
+  .qa summary:hover span{text-decoration:underline; text-underline-offset:5px; text-decoration-thickness:2px}
+  .qa i{position:relative; flex:none; width:2.2rem; height:2.2rem; background:var(--ink); transition:transform .5s var(--turn), background .3s}
+  .qa i::before, .qa i::after{content:""; position:absolute; left:50%; top:50%; width:46%; height:3px; background:var(--yellow); transform:translate(-50%, -50%)}
+  .qa i::after{transform:translate(-50%, -50%) rotate(90deg)}
+  .qa[open] i{transform:rotate(45deg); background:var(--red)}
+  .qa p{padding:0 3.7rem 1.6rem 0; color:var(--muted); max-width:46rem}
+  @media (max-width:720px){ .qa p{padding-right:0} }
+
   /* closing */
   .closing{background:var(--blue); color:var(--paper); padding-bottom:0; overflow:hidden}
   .closing .label{color:rgba(242,237,227,.7)}
@@ -233,8 +324,15 @@
   .marquee .glyph{width:clamp(4.5rem, 8vw, 7rem); height:clamp(4.5rem, 8vw, 7rem); flex:none}
   @keyframes slide{to{transform:translateX(-50%)}}
 
-  footer{padding-block:2rem 2.5rem; display:flex; justify-content:space-between; gap:1rem 2rem; flex-wrap:wrap; font-size:.9rem}
+  footer{padding-block:2.5rem 3rem; display:grid; grid-template-columns:1fr auto; gap:1.5rem 3rem; align-items:end; font-size:.92rem}
   footer a{text-underline-offset:3px}
+  footer a:hover{text-decoration-thickness:2px}
+  .made{font:600 clamp(1.3rem, 2.4vw, 1.9rem)/1.15 var(--display); letter-spacing:-.025em}
+  .made a{text-decoration:none; background:linear-gradient(var(--yellow), var(--yellow)) 0 88% / 100% .32em no-repeat}
+  .made a:hover{background-size:100% .9em}
+  .links{display:flex; flex-wrap:wrap; gap:.4rem 1.2rem; margin-top:.9rem}
+  .fine{color:var(--muted); text-align:right}
+  @media (max-width:720px){ footer{grid-template-columns:1fr} .fine{text-align:left} }
 
   /* reveal */
   .reveal{opacity:0; transform:translateY(20px); transition:opacity .9s var(--ease), transform .9s var(--ease)}
@@ -244,8 +342,9 @@
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto}
     .rise, .reveal, .url, .tile.in{opacity:1; transform:none; animation:none; transition:none}
+    .demo{animation:none}
     .caret, .marquee{animation:none}
-    .tile svg, .glyph, .core i{transition:none}
+    .tile svg, .glyph, .qa i{transition:none}
   }
 </style>
 </head>
@@ -276,7 +375,15 @@
         <a class="btn ghost" href="#self-host">Run it on your infra</a>
       </div>
     </div>
-    <div class="art" id="art" role="img" aria-label="A grid of shifting geometric tiles. The center square turns into a circle when the site goes live."></div>
+    <div class="stage">
+      <div class="art" id="art" aria-hidden="true"></div>
+      <figure class="demo">
+        <video id="demo" muted loop playsinline preload="auto" poster="assets/demo-poster.png" aria-label="Demo: set up ownnow with Docker, tell an agent to publish a site, and open the live URL on your own domain.">
+          <source src="assets/demo.webm" type="video/webm">
+          <source src="assets/demo.mp4" type="video/mp4">
+        </video>
+      </figure>
+    </div>
   </div>
 
   <div class="band">
@@ -297,7 +404,7 @@
       <p class="label">How it works</p>
       <div>
         <h2>Three calls. <em>Never half-live.</em></h2>
-        <p class="sub">The same flow agents already know from here.now. A site goes live only when finalize succeeds.</p>
+        <p class="sub">Create, upload, finalize. A site goes live only when finalize succeeds, so nobody ever sees a half-uploaded page.</p>
       </div>
     </div>
     <div class="fields">
@@ -396,6 +503,49 @@
     </div>
   </section>
 
+  <section id="faq">
+    <div class="wrap">
+      <div class="head reveal">
+        <p class="label">FAQ</p>
+        <div><h2>Questions, <em>answered.</em></h2></div>
+      </div>
+      <div class="faq reveal">
+        <details class="qa">
+          <summary><span>What is ownnow?</span><i aria-hidden="true"></i></summary>
+          <p>ownnow publishes a file or folder to a live URL on your own domain. It is one Go binary that runs on your server and keeps files in your storage. It is open source under the MIT license.</p>
+        </details>
+        <details class="qa">
+          <summary><span>How is it different from here.now?</span><i aria-hidden="true"></i></summary>
+          <p>here.now is a hosted service. ownnow is software you run yourself, with no accounts, no hosted control plane, and no telemetry. Some here.now features, like email allowlists, analytics, and teams, are not built yet.</p>
+        </details>
+        <details class="qa">
+          <summary><span>Can my AI agent publish to it?</span><i aria-hidden="true"></i></summary>
+          <p>Yes. The repo ships an agent skill for Claude, Cursor, and other agents. Set OWNNOW_SERVER and OWNNOW_API_KEY, then tell your agent “publish this”.</p>
+        </details>
+        <details class="qa">
+          <summary><span>What does it cost to run?</span><i aria-hidden="true"></i></summary>
+          <p>The software is free. You pay for your own server and bandwidth. On Cloudflare, R2 has no egress fees and the serving Worker fits the free tier.</p>
+        </details>
+        <details class="qa">
+          <summary><span>What can I publish?</span><i aria-hidden="true"></i></summary>
+          <p>Static files: HTML sites, images, PDFs, and any other file type. Single-page apps, custom 404 pages, and Wasm games work. ownnow does not run server-side code.</p>
+        </details>
+        <details class="qa">
+          <summary><span>Do I need my own domain?</span><i aria-hidden="true"></i></summary>
+          <p>For public sites, yes. Point an A record at your server and Caddy handles TLS. Add wildcard DNS to give every site its own subdomain. For local work, the single binary runs on localhost.</p>
+        </details>
+        <details class="qa">
+          <summary><span>How do updates and rollbacks work?</span><i aria-hidden="true"></i></summary>
+          <p>Publish again with the same slug to create a new version. Every version is kept, so a rollback switches back to an old one without uploading anything.</p>
+        </details>
+        <details class="qa">
+          <summary><span>Who can publish to my server?</span><i aria-hidden="true"></i></summary>
+          <p>Anyone with your API key, and no one else. Without a key, the server runs in anonymous mode: sites expire after 24 hours and a claim token guards updates.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
   <section class="closing">
     <div class="wrap reveal">
       <p class="label">Get started</p>
@@ -410,8 +560,19 @@
 </main>
 
 <footer class="wrap">
-  <span>ownnow is open source under the MIT license. This page makes no third-party requests.</span>
-  <span><a href="https://github.com/harssha6/ownnow">GitHub</a> · <a href="https://github.com/harssha6/ownnow/releases">Releases</a> · <a href="https://github.com/harssha6/ownnow/blob/main/LICENSE">MIT license</a></span>
+  <div>
+    <p class="made">Made by <a href="https://harssha.design">Harssha Vardan</a></p>
+    <nav class="links" aria-label="Harssha Vardan elsewhere">
+      <a href="https://harssha.design">Website</a>
+      <a href="https://x.com/Harsshavardan3">X</a>
+      <a href="https://github.com/harssha6">GitHub</a>
+      <a href="https://www.linkedin.com/in/harssha-vardan-a031371a4/">LinkedIn</a>
+    </nav>
+  </div>
+  <div class="fine">
+    <p>ownnow is open source under the MIT license.</p>
+    <p><a href="https://github.com/harssha6/ownnow">Source</a> · <a href="https://github.com/harssha6/ownnow/releases">Releases</a> · <a href="https://github.com/harssha6/ownnow/blob/main/LICENSE">License</a></p>
+  </div>
 </footer>
 
 <script>
@@ -435,36 +596,38 @@
   const tile = (shape, bg, fg) => `<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="${C[bg]}"/>${SHAPES[shape](C[fg])}</svg>`;
   document.querySelectorAll('.glyph[data-shape]').forEach(g => g.innerHTML = tile(g.dataset.shape, g.dataset.bg, g.dataset.fg));
 
-  // Hero art: a 3x3 grid. The center tile is the site itself: square until it goes live.
+  // Hero art: a 3x3 grid of shifting tiles behind the demo video.
   const art = document.getElementById('art');
   const layout = [
     ['quarter','blue','yellow',0], ['half','ink','pink',180], ['ring','red','paper',0],
-    ['leaf','yellow','ink',90], null, ['dots','green','pink',0],
+    ['leaf','yellow','ink',90], ['circle','paper','blue',0], ['dots','green','pink',0],
     ['arch','pink','red',0], ['stripes','paper','ink',90], ['tri','blue','red',270],
   ];
   const tiles = layout.map((t, i) => {
     const el = document.createElement('div');
     el.className = 'tile' + (reduce ? '' : ' in');
     el.style.setProperty('--i', i);
-    if (!t) { el.classList.add('core'); el.innerHTML = '<i></i>'; }
-    else {
-      const [shape, bg, fg, rot] = t;
-      el.innerHTML = tile(shape, bg, fg);
-      el.rot = rot; el.firstChild.style.transform = `rotate(${rot}deg)`;
-      el.addEventListener('pointerenter', () => turn(el));
-      el.addEventListener('click', () => turn(el));
-    }
+    const [shape, bg, fg, rot] = t;
+    el.innerHTML = tile(shape, bg, fg);
+    el.rot = rot; el.firstChild.style.transform = `rotate(${rot}deg)`;
+    el.addEventListener('pointerenter', () => turn(el));
+    el.addEventListener('click', () => turn(el));
     art.appendChild(el);
     return el;
   });
-  const core = tiles[4];
   function turn(el, dir = 1){ el.rot += 90 * dir; el.firstChild.style.transform = `rotate(${el.rot}deg)`; }
 
+  // The demo plays only while the hero is on screen; reduced motion keeps the poster frame.
+  const demo = document.getElementById('demo');
   let artVisible = true;
-  new IntersectionObserver(([e]) => artVisible = e.isIntersecting).observe(art);
+  new IntersectionObserver(([e]) => {
+    artVisible = e.isIntersecting;
+    if (reduce) return;
+    if (artVisible) demo.play().catch(() => {}); else demo.pause();
+  }).observe(art);
   if (!reduce) setInterval(() => {
     if (!artVisible || document.hidden) return;
-    const pool = tiles.filter(t => t !== core && getComputedStyle(t).display !== 'none');
+    const pool = tiles.filter(t => getComputedStyle(t).display !== 'none');
     turn(pool[Math.floor(Math.random() * pool.length)], Math.random() < .5 ? 1 : -1);
   }, 1500);
 
@@ -475,13 +638,12 @@
   const domain = document.getElementById('domain');
   const domains = ['yourdomain.com', 'yourname.dev', 'yourstudio.co'];
 
-  function goLive(){ url.classList.add('on'); core.classList.add('live'); }
+  function goLive(){ url.classList.add('on'); }
   function cycle(){
     let i = 0;
     setInterval(() => {
       domain.classList.add('swap');
-      core.classList.add('bump');
-      setTimeout(() => { i = (i + 1) % domains.length; domain.textContent = domains[i]; domain.classList.remove('swap'); core.classList.remove('bump'); }, 300);
+      setTimeout(() => { i = (i + 1) % domains.length; domain.textContent = domains[i]; domain.classList.remove('swap'); }, 300);
     }, 2800);
   }
   if (reduce) { typed.textContent = cmd; goLive(); }
