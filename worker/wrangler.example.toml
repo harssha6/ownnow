@@ -1,0 +1,20 @@
+# ownnow edge (OPTIONAL Cloudflare serving path) — serves sites from R2
+# at {slug}.<your-domain> with zero egress fees. Requires your domain's
+# zone to be on Cloudflare. Copy to wrangler.toml, edit, deploy:
+#   cd worker && bun install
+#   bunx wrangler r2 bucket create ownnow
+#   bun run deploy
+name = "ownnow"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# Wildcard: every {slug}.example.com hits this Worker. Your apex/www
+# records are separate and unaffected.
+routes = [{ pattern = "*.example.com", zone_name = "example.com" }]
+
+[vars]
+BASE_DOMAIN = "example.com"
+
+[[r2_buckets]]
+binding = "SITES"
+bucket_name = "ownnow"

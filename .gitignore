@@ -1,0 +1,5 @@
+ownnow
+data/
+worker/node_modules/
+.env
+worker/wrangler.toml

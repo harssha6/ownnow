@@ -1,0 +1,36 @@
+# ownnow — bring your own infra in one command:
+#   cp .env.example .env   # set OWNNOW_DOMAIN + keys
+#   docker compose up -d
+# Then point your domain's DNS A record at this host.
+services:
+  ownnow:
+    build: .
+    image: ownnow:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      OWNNOW_ADDR: ":8080"
+    volumes:
+      - ownnow_data:/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      OWNNOW_DOMAIN: ${OWNNOW_DOMAIN:?set OWNNOW_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ownnow
+
+volumes:
+  ownnow_data:
+  caddy_data:
+  caddy_config:

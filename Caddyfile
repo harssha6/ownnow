@@ -1,0 +1,4 @@
+{$OWNNOW_DOMAIN} {
+	reverse_proxy ownnow:8080
+	encode gzip
+}
