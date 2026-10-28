@@ -14,8 +14,8 @@ ownnow publish ./my-site
 
 ![ownnow demo](assets/demo-v4.gif)
 
-**Live demo:** [now.harssha.design/demo](https://now.harssha.design/demo/), the
-landing page in `examples/demo-site`, published with ownnow itself.
+**Website:** [ownnow.dev](https://ownnow.dev). Its source is
+`examples/demo-site`, deployed on Vercel from `main`.
 
 **Install the binary** (no Go toolchain needed): grab `ownnow` for your
 platform from the [latest release](https://github.com/harssha6/ownnow/releases),
