@@ -12,7 +12,7 @@ ownnow publish ./my-site
 # -> https://now.example.com/bright-canvas-a7k2/
 ```
 
-![ownnow demo](assets/demo-v2.gif)
+![ownnow demo](assets/demo-v3.gif)
 
 **Install the binary** (no Go toolchain needed): grab `ownnow` for your
 platform from the [latest release](https://github.com/harssha6/ownnow/releases),
