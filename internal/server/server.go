@@ -383,10 +383,18 @@ func (s *Server) finalize(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	// verify every declared file actually arrived before going live
-	for _, f := range version.Files {
-		objs, err := s.cfg.Store.List(r.Context(), s.fileKey(slug, version.ID, f.Path))
-		if err != nil || len(objs) == 0 {
+	// verify every declared file actually arrived before going live, and
+	// record the size that arrived (clients may rewrite files after create)
+	for i, f := range version.Files {
+		key := s.fileKey(slug, version.ID, f.Path)
+		objs, err := s.cfg.Store.List(r.Context(), key)
+		found := false
+		for _, o := range objs {
+			if o.Key == key {
+				version.Files[i].Size, found = o.Size, true
+			}
+		}
+		if err != nil || !found {
 			fail(w, 400, "missing uploaded file: "+f.Path)
 			return
 		}
