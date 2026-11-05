@@ -53,6 +53,10 @@ type Site struct {
 	SPA          bool       `json:"spa,omitempty"`
 	COI          bool       `json:"crossOriginIsolation,omitempty"`
 	Anonymous    bool       `json:"anonymous,omitempty"`
+	// Indexable is a tri-state search-indexing switch. nil = never set
+	// (served exactly as before), false = every response for the slug carries
+	// X-Robots-Tag noindex, true = no header and the site joins /sitemap.xml.
+	Indexable *bool `json:"indexable,omitempty"`
 }
 
 type Config struct {
@@ -99,7 +103,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/publish/{slug}/files", s.files)
 	m.HandleFunc("POST /api/v1/publish/{slug}/unlock", s.unlock)
 	m.HandleFunc("GET /api/v1/publishes", s.list)
-	m.HandleFunc("/", s.serveSite) // catch-all: subdomain or /{slug}/...
+	m.HandleFunc("/", s.serveSite) // catch-all: subdomain, /{slug}/..., /robots.txt, /sitemap.xml
 }
 
 // ---------- helpers ----------
@@ -226,6 +230,7 @@ type createReq struct {
 	COI         bool        `json:"crossOriginIsolation,omitempty"`
 	DisplayName string      `json:"displayName,omitempty"`
 	Description string      `json:"displayDescription,omitempty"`
+	Indexable   *bool       `json:"indexable,omitempty"`
 }
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +289,9 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Description != "" {
 		site.Description = req.Description
+	}
+	if req.Indexable != nil { // absent = keep what the site already has
+		site.Indexable = req.Indexable
 	}
 	version := Version{ID: randID("v_"), CreatedAt: time.Now().UTC()}
 	uploads := make([]map[string]any, 0, len(req.Files))
@@ -411,8 +419,22 @@ func (s *Server) metadata(w http.ResponseWriter, r *http.Request) {
 		SPA         *bool   `json:"spa"`
 		COI         *bool   `json:"crossOriginIsolation"`
 		TTLHours    *int    `json:"ttlHours"`
+		// raw so absent (no change), null (back to unset) and a bool differ
+		Indexable json.RawMessage `json:"indexable"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&patch)
+	if len(patch.Indexable) > 0 {
+		if string(patch.Indexable) == "null" {
+			site.Indexable = nil
+		} else {
+			var v bool
+			if err := json.Unmarshal(patch.Indexable, &v); err != nil {
+				fail(w, 400, "indexable must be true, false or null")
+				return
+			}
+			site.Indexable = &v
+		}
+	}
 	if patch.DisplayName != nil {
 		site.DisplayName = *patch.DisplayName
 	}
@@ -578,7 +600,18 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug, rest := s.resolveSlug(r)
+	if rest == "" && !s.isSiteHost(r) {
+		switch slug {
+		case "robots.txt":
+			s.robots(w, r)
+			return
+		case "sitemap.xml":
+			s.sitemap(w, r)
+			return
+		}
+	}
 	if slug == "" || slug == "api" {
+		w.Header().Set("X-Robots-Tag", noIndex)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!doctype html><title>ownnow</title><h1>ownnow</h1><p>Your own here.now. Publish: <code>ownnow publish ./site</code></p><p><a href="/api/v1/publishes">/api/v1/publishes</a> · <a href="/healthz">/healthz</a></p>`)
 		return
@@ -587,6 +620,10 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	if err != nil || site.Current == "" {
 		http.NotFound(w, r)
 		return
+	}
+	// before any early return, so the password page, 410 and 404 carry it too
+	if site.Indexable != nil && !*site.Indexable {
+		w.Header().Set("X-Robots-Tag", noIndex)
 	}
 	if site.ExpiresAt != nil && time.Now().UTC().After(*site.ExpiresAt) {
 		w.WriteHeader(http.StatusGone)
@@ -712,4 +749,93 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, slug, version
 	}
 	w.Header().Set("ETag", `"`+hashStr(string(data))[:16]+`"`)
 	http.ServeContent(w, r, f.Path, time.Time{}, strings.NewReader(string(data))) // gives Range support
+}
+
+// ---------- search indexing ----------
+
+// noIndex covers HTML and non-HTML files alike (PDFs, images), which a meta
+// tag cannot reach.
+const noIndex = "noindex, nofollow, noarchive"
+
+// isSiteHost reports whether the request is for {slug}.BaseDomain, where
+// /robots.txt and /sitemap.xml belong to the site itself.
+func (s *Server) isSiteHost(r *http.Request) bool {
+	if s.cfg.BaseDomain == "" {
+		return false
+	}
+	return strings.HasSuffix(strings.Split(r.Host, ":")[0], "."+s.cfg.BaseDomain)
+}
+
+func (s *Server) rootURL() string {
+	if s.cfg.BaseDomain != "" {
+		return "https://" + s.cfg.BaseDomain
+	}
+	if s.cfg.PublicURL != "" {
+		return strings.TrimRight(s.cfg.PublicURL, "/")
+	}
+	return "http://127.0.0.1:8080"
+}
+
+// indexableSites returns live, unexpired, unlocked sites that opted in with
+// indexable=true. Nothing else is ever named in robots.txt or sitemap.xml.
+func (s *Server) indexableSites(r *http.Request) []*Site {
+	objs, _ := s.cfg.Store.List(r.Context(), "_meta/sites/")
+	now := time.Now().UTC()
+	var out []*Site
+	for _, o := range objs {
+		st, err := s.loadSite(r, strings.TrimSuffix(path.Base(o.Key), ".json"))
+		if err != nil || st.Indexable == nil || !*st.Indexable || st.Current == "" || st.PasswordHash != "" {
+			continue
+		}
+		if st.ExpiresAt != nil && now.After(*st.ExpiresAt) {
+			continue
+		}
+		out = append(out, st)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out
+}
+
+func (st *Site) currentHas(p string) bool {
+	for _, v := range st.Versions {
+		if v.ID == st.Current {
+			for _, f := range v.Files {
+				if f.Path == p {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// robots allows everything on purpose. Disallowing a private slug would stop
+// crawlers from fetching it and seeing its noindex header, and would publish
+// the slug. Private sites stay out of search through X-Robots-Tag instead.
+func (s *Server) robots(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	fmt.Fprintf(w, "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", s.rootURL())
+	for _, st := range s.indexableSites(r) {
+		if st.currentHas("sitemap.xml") {
+			fmt.Fprintf(w, "Sitemap: %ssitemap.xml\n", s.siteURL(st.Slug))
+		}
+	}
+}
+
+// sitemap lists the root URL of every indexable site and nothing else.
+func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>`+"\n"+`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`+"\n")
+	for _, st := range s.indexableSites(r) {
+		mod := st.CreatedAt
+		for _, v := range st.Versions {
+			if v.ID == st.Current {
+				mod = v.CreatedAt
+			}
+		}
+		fmt.Fprintf(w, "  <url><loc>%s</loc><lastmod>%s</lastmod></url>\n", html.EscapeString(s.siteURL(st.Slug)), mod.Format("2006-01-02"))
+	}
+	fmt.Fprint(w, "</urlset>\n")
 }
