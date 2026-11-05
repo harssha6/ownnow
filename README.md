@@ -85,7 +85,7 @@ OWNNOW_API_KEY=$(openssl rand -hex 32) ./ownnow serve   # :8080, local disk
 ## Publishing
 
 ```bash
-ownnow publish ./site [--slug name] [--password pw] [--ttl-hours 24] [--spa]
+ownnow publish ./site [--slug name] [--password pw] [--ttl-hours 24] [--spa] [--index|--noindex]
 ownnow list
 ownnow rollback <slug> <version-id>
 ownnow delete <slug>
@@ -96,6 +96,16 @@ TTL and expiry, anonymous 24-hour sites with claim tokens, SPA
 fallback, custom `404.html`, directory listings, correct
 `application/wasm` plus COOP and COEP headers for Wasm and games, and
 Range requests.
+
+**Search and link previews:** each site has an `indexable` switch.
+`false` sends `X-Robots-Tag: noindex, nofollow, noarchive` on every
+response for the site, PDFs and images included. `true` lists the site in
+the server's `/sitemap.xml`. Unset serves the site exactly as before. The
+root `/robots.txt` allows all crawling on purpose, so crawlers can see the
+noindex header. The agent skill's `publish.py` makes new sites noindex
+unless told `--index`, and adds Open Graph tags, a canonical link and a
+generated 1200x630 preview image wherever a page has none.
+`skill/scripts/seo_check.py` lints a page for either mode.
 
 **For AI agents:** an agent skill lives in [`skill/`](skill/). Point
 Claude, Cursor, or another agent at it, set `OWNNOW_SERVER` and
@@ -153,6 +163,7 @@ custom-domain mounts, folders and search, teams. PRs welcome.
 
 ```bash
 go test ./...
+python3 -m unittest discover -s skill/scripts/tests
 cd worker && bun install && bunx tsc -p tsconfig.json
 ```
 
