@@ -76,7 +76,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("ownnow serve | publish [--slug x] [--ttl-hours n] [--password p] [--spa] <file-or-dir> | list | delete <slug> | rollback <slug> <versionId> | version")
+	fmt.Println("ownnow serve | publish [--slug x] [--ttl-hours n] [--password p] [--spa] [--index|--noindex] <file-or-dir> | list | delete <slug> | rollback <slug> <versionId> | version")
 }
 
 func serve() error {
@@ -181,6 +181,7 @@ func publish(args []string) error {
 	var slug, password string
 	var ttl int
 	spa := false
+	var indexable *bool // nil = leave the server's value alone
 	var target string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -195,6 +196,9 @@ func publish(args []string) error {
 			fmt.Sscan(args[i], &ttl)
 		case "--spa":
 			spa = true
+		case "--index", "--noindex":
+			v := args[i] == "--index"
+			indexable = &v
 		default:
 			target = args[i]
 		}
@@ -224,7 +228,11 @@ func publish(args []string) error {
 			URL  string `json:"url"`
 		} `json:"uploads"`
 	}
-	if err := doJSON(method, url, map[string]any{"files": metas, "password": password, "ttlHours": ttl, "spa": spa}, &created); err != nil {
+	body := map[string]any{"files": metas, "password": password, "ttlHours": ttl, "spa": spa}
+	if indexable != nil {
+		body["indexable"] = *indexable
+	}
+	if err := doJSON(method, url, body, &created); err != nil {
 		return err
 	}
 	byPath := map[string]string{}

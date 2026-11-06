@@ -4,3 +4,4 @@ worker/node_modules/
 .env
 worker/wrangler.toml
 .vercel
+__pycache__/

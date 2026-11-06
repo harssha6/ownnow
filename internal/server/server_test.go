@@ -92,3 +92,23 @@ func TestTraversalRejected(t *testing.T) {
 		t.Fatal("normal path should pass")
 	}
 }
+
+func TestFinalizeRecordsUploadedSize(t *testing.T) {
+	ts := testServer(t)
+	// the client declares a stale size (it rewrote the file after create)
+	code, created := call(t, ts, "PUT", "/api/v1/publish/sized", map[string]any{
+		"files": []map[string]any{{"path": "index.html", "size": 3}},
+	}, nil)
+	if code != 201 {
+		t.Fatalf("create: %d", code)
+	}
+	up := created["uploads"].([]any)[0].(map[string]any)
+	req, _ := http.NewRequest("PUT", ts.URL+up["url"].(string), strings.NewReader("<h1>longer</h1>"))
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	call(t, ts, "POST", "/api/v1/publish/sized/finalize", map[string]any{"versionId": created["versionId"]}, nil)
+	_, files := call(t, ts, "GET", "/api/v1/publish/sized/files", nil, nil)
+	if got := files["files"].([]any)[0].(map[string]any)["size"]; got != float64(15) {
+		t.Fatalf("recorded size = %v, want 15", got)
+	}
+}

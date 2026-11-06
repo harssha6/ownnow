@@ -21,6 +21,7 @@ type SiteMeta = {
   spa?: boolean;
   crossOriginIsolation?: boolean;
   expiresAt?: string;
+  indexable?: boolean;
 };
 type SiteSecrets = { PasswordHash?: string };
 
@@ -63,10 +64,12 @@ export default {
     if (!metaObj) return new Response("not found", { status: 404 });
     const site = (await metaObj.json()) as SiteMeta;
     if (!site.currentVersion) return new Response("not found", { status: 404 });
-    if (site.expiresAt && new Date(site.expiresAt) < new Date())
-      return new Response("this site has expired", { status: 410 });
-
     const headers = new Headers();
+    // same tri-state as the Go server: only an explicit false sends noindex
+    if (site.indexable === false) headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    if (site.expiresAt && new Date(site.expiresAt) < new Date())
+      return new Response("this site has expired", { status: 410, headers });
+
     if (site.crossOriginIsolation) {
       headers.set("Cross-Origin-Opener-Policy", "same-origin");
       headers.set("Cross-Origin-Embedder-Policy", "require-corp");
