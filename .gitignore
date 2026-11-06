@@ -5,3 +5,4 @@ worker/node_modules/
 worker/wrangler.toml
 .vercel
 __pycache__/
+skill/local/

@@ -11,19 +11,42 @@ Share previews: HTML pages get og:*, twitter:card, canonical and a
 generated 1200x630 og image wherever the page has none. Tags you wrote
 are never changed. --no-share-preview uploads your files untouched.
 
-Env: OWNNOW_SERVER (your instance), OWNNOW_API_KEY (publish key).
+Server and key: env OWNNOW_SERVER / OWNNOW_API_KEY win; otherwise the
+optional local/config.json next to SKILL.md supplies "server" and a
+"keyCommand" (argv run from the skill folder; its stdout is the key).
 Your files on disk are never modified; injection happens in memory.
 """
-import json, mimetypes, os, pathlib, sys, urllib.error, urllib.request
+import json, mimetypes, os, pathlib, subprocess, sys, urllib.error, urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import seo  # noqa: E402
 
-SERVER = os.environ.get("OWNNOW_SERVER", "http://127.0.0.1:8080").rstrip("/")
+SKILL_DIR = pathlib.Path(__file__).resolve().parent.parent
 
 
-def api_key() -> str:
-    return os.environ.get("OWNNOW_API_KEY", "")
+def local_config(skill_dir=SKILL_DIR) -> dict:
+    """Per-install settings kept out of the repo (skill/local/ is gitignored)."""
+    f = skill_dir / "local" / "config.json"
+    return json.loads(f.read_text()) if f.is_file() else {}
+
+
+def server_url(env=os.environ, cfg=None) -> str:
+    cfg = local_config() if cfg is None else cfg
+    return (env.get("OWNNOW_SERVER") or cfg.get("server") or "http://127.0.0.1:8080").rstrip("/")
+
+
+def api_key(env=os.environ, cfg=None, skill_dir=SKILL_DIR) -> str:
+    if env.get("OWNNOW_API_KEY"):
+        return env["OWNNOW_API_KEY"]
+    cfg = local_config(skill_dir) if cfg is None else cfg
+    cmd = cfg.get("keyCommand")
+    if not cmd:
+        return ""
+    argv = [sys.executable if a == "python3" else a for a in cmd]
+    return subprocess.run(argv, cwd=skill_dir, capture_output=True, text=True, check=True).stdout.strip()
+
+
+SERVER = server_url()
 
 
 def call(method, path, key, body=None, data=None, ctype="application/json"):

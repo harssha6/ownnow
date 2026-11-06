@@ -109,7 +109,8 @@ generated 1200x630 preview image wherever a page has none.
 
 **For AI agents:** an agent skill lives in [`skill/`](skill/). Point
 Claude, Cursor, or another agent at it, set `OWNNOW_SERVER` and
-`OWNNOW_API_KEY`, and "publish this" works against your instance.
+`OWNNOW_API_KEY` (or a gitignored `skill/local/config.json`, see the
+skill's Setup), and "publish this" works against your instance.
 
 ## Auth model
 
