@@ -106,6 +106,22 @@
     },
     {
       "@type": "Question",
+      "name": "Will my sites show up in Google?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Only the ones you choose. Each site has an indexable switch. A noindex site sends X-Robots-Tag: noindex on every response, PDFs and images included. An indexable site joins the root sitemap.xml. The agent skill publishes new sites as noindex unless you ask for search, and you can flip a site later with one API call. Existing sites keep their current behaviour until you set the switch."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do shared links get a preview?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. When an agent publishes HTML, the skill adds a title, description, canonical link, Open Graph and Twitter tags, and a 1200x630 preview image wherever the page has none. Tags you wrote are never changed. noindex does not hide previews: Slack, X, and iMessage still unfurl the link."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Who can publish to my server?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -499,6 +515,9 @@
         <div class="feature"><span class="glyph" data-shape="leaf" data-bg="yellow" data-fg="blue"></span><b>SPAs & 404s</b><p>SPA fallback, custom <code>404.html</code>, and directory listings.</p></div>
         <div class="feature"><span class="glyph" data-shape="diamond" data-bg="blue" data-fg="paper"></span><b>Wasm & games</b><p>Correct <code>application/wasm</code> plus COOP and COEP headers.</p></div>
         <div class="feature"><span class="glyph" data-shape="quarter" data-bg="red" data-fg="ink"></span><b>Agent skill</b><p>Claude, Cursor, and other agents can publish to your instance.</p></div>
+        <div class="feature"><span class="glyph" data-shape="circle" data-bg="pink" data-fg="ink"></span><b>Link previews</b><p>Pages unfurl in Slack, X, and iMessage. The skill adds missing Open Graph tags and a 1200x630 card.</p></div>
+        <div class="feature"><span class="glyph" data-shape="stripes" data-bg="green" data-fg="ink"></span><b>Search switch</b><p>Mark each site indexable or noindex. The noindex header covers PDFs and images too.</p></div>
+        <div class="feature"><span class="glyph" data-shape="ring" data-bg="ink" data-fg="pink"></span><b>Sitemap & robots</b><p>Indexable sites join a root <code>sitemap.xml</code>. Private slugs are never listed.</p></div>
       </div>
     </div>
   </section>
@@ -537,6 +556,14 @@
         <details class="qa">
           <summary><span>How do updates and rollbacks work?</span><i aria-hidden="true"></i></summary>
           <p>Publish again with the same slug to create a new version. Every version is kept, so a rollback switches back to an old one without uploading anything.</p>
+        </details>
+        <details class="qa">
+          <summary><span>Will my sites show up in Google?</span><i aria-hidden="true"></i></summary>
+          <p>Only the ones you choose. Each site has an indexable switch. A noindex site sends <code>X-Robots-Tag: noindex</code> on every response, PDFs and images included. An indexable site joins the root <code>sitemap.xml</code>. The agent skill publishes new sites as noindex unless you ask for search, and you can flip a site later with one API call. Existing sites keep their current behaviour until you set the switch.</p>
+        </details>
+        <details class="qa">
+          <summary><span>Do shared links get a preview?</span><i aria-hidden="true"></i></summary>
+          <p>Yes. When an agent publishes HTML, the skill adds a title, description, canonical link, Open Graph and Twitter tags, and a 1200x630 preview image wherever the page has none. Tags you wrote are never changed. noindex does not hide previews: Slack, X, and iMessage still unfurl the link.</p>
         </details>
         <details class="qa">
           <summary><span>Who can publish to my server?</span><i aria-hidden="true"></i></summary>
