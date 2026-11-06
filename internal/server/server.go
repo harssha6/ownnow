@@ -68,11 +68,15 @@ type Config struct {
 	// PresignedUploads: when the store can presign (R2/S3), upload URLs point
 	// straight at object storage. Required behind Vercel's 4.5 MB body cap.
 	PresignedUploads bool
+	// IndexCacheTTL: how long robots.txt and sitemap.xml reuse the list of
+	// indexable sites. 0 = DefaultIndexCacheTTL, negative = no cache.
+	IndexCacheTTL time.Duration
 }
 
 type Server struct {
 	cfg Config
 	mux *http.ServeMux
+	idx indexCache
 }
 
 func New(cfg Config) *Server {
@@ -175,6 +179,7 @@ func (s *Server) loadSite(r *http.Request, slug string) (*Site, error) {
 }
 
 func (s *Server) saveSite(r *http.Request, site *Site) error {
+	defer s.idx.invalidate() // publish, finalize, metadata, rollback all pass here
 	b, _ := json.Marshal(site)
 	if err := s.cfg.Store.Put(r.Context(), s.metaKey(site.Slug), strings.NewReader(string(b)), int64(len(b)), "application/json"); err != nil {
 		return err
@@ -546,6 +551,7 @@ func (s *Server) deleteSite(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.cfg.Store.Delete(r.Context(), s.metaKey(slug))
 	_ = s.cfg.Store.Delete(r.Context(), "_meta/secrets/"+slug+".json")
+	s.idx.invalidate()
 	writeJSON(w, 200, map[string]any{"deleted": slug})
 }
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
@@ -787,20 +793,13 @@ func (s *Server) rootURL() string {
 // indexableSites returns live, unexpired, unlocked sites that opted in with
 // indexable=true. Nothing else is ever named in robots.txt or sitemap.xml.
 func (s *Server) indexableSites(r *http.Request) []*Site {
-	objs, _ := s.cfg.Store.List(r.Context(), "_meta/sites/")
 	now := time.Now().UTC()
 	var out []*Site
-	for _, o := range objs {
-		st, err := s.loadSite(r, strings.TrimSuffix(path.Base(o.Key), ".json"))
-		if err != nil || st.Indexable == nil || !*st.Indexable || st.Current == "" || st.PasswordHash != "" {
-			continue
+	for _, st := range s.indexCandidates(r.Context()) {
+		if st.ExpiresAt == nil || !now.After(*st.ExpiresAt) {
+			out = append(out, st)
 		}
-		if st.ExpiresAt != nil && now.After(*st.ExpiresAt) {
-			continue
-		}
-		out = append(out, st)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
 	return out
 }
 
@@ -822,7 +821,7 @@ func (st *Site) currentHas(p string) bool {
 // the slug. Private sites stay out of search through X-Robots-Tag instead.
 func (s *Server) robots(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", "public, max-age=60")
 	fmt.Fprintf(w, "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", s.rootURL())
 	for _, st := range s.indexableSites(r) {
 		if st.currentHas("sitemap.xml") {
@@ -834,7 +833,7 @@ func (s *Server) robots(w http.ResponseWriter, r *http.Request) {
 // sitemap lists the root URL of every indexable site and nothing else.
 func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", "public, max-age=60")
 	fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>`+"\n"+`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`+"\n")
 	for _, st := range s.indexableSites(r) {
 		mod := st.CreatedAt
