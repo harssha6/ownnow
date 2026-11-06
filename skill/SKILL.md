@@ -26,6 +26,19 @@ Install by copying this `skill/` folder to your agent's skills directory
 (e.g. `~/.claude/skills/ownnow`, `~/.cursor/skills/ownnow`), or with the
 skills CLI if you published your fork: `npx skills add <you>/ownnow --skill ownnow`.
 
+Or keep your instance settings in a `local/` folder inside the installed
+skill, so the rest stays identical to this repo and updates are a plain
+copy. The repo ignores `skill/local/`.
+
+- `local/config.json`: `{"server": "https://now.example.com", "keyCommand": ["python3", "local/get_key.py"]}`.
+  `keyCommand` runs from the skill folder and prints the key on stdout
+  (read it from your secret manager there; never store the key itself).
+  The env vars above win when set.
+- `local/NOTES.md`: your instance's house rules, auth and ops notes.
+
+**If `local/NOTES.md` exists, read it before publishing. Its rules
+override the generic text in this file.**
+
 ## Publish
 
 ```bash

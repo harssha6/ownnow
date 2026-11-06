@@ -76,6 +76,35 @@ class StageTest(unittest.TestCase):
 
 
 @unittest.skipUnless(seo.can_render(), "Pillow not installed")
+class LocalConfigTest(unittest.TestCase):
+    def skill(self, config=None):
+        d = pathlib.Path(tempfile.mkdtemp())
+        if config is not None:
+            (d / "local").mkdir()
+            (d / "local" / "config.json").write_text(__import__("json").dumps(config))
+            (d / "local" / "key.py").write_text("print('k-from-command')")
+        return d
+
+    def test_no_local_folder_keeps_the_generic_defaults(self):
+        d = self.skill()
+        cfg = publish.local_config(d)
+        self.assertEqual(publish.server_url({}, cfg), "http://127.0.0.1:8080")
+        self.assertEqual(publish.api_key({}, cfg, d), "")
+
+    def test_local_config_supplies_server_and_key(self):
+        d = self.skill({"server": "https://now.example.com/", "keyCommand": ["python3", "local/key.py"]})
+        cfg = publish.local_config(d)
+        self.assertEqual(publish.server_url({}, cfg), "https://now.example.com")
+        self.assertEqual(publish.api_key({}, cfg, d), "k-from-command")
+
+    def test_env_wins_over_local_config(self):
+        d = self.skill({"server": "https://now.example.com", "keyCommand": ["false"]})
+        env = {"OWNNOW_SERVER": "http://127.0.0.1:9", "OWNNOW_API_KEY": "k-env"}
+        cfg = publish.local_config(d)
+        self.assertEqual(publish.server_url(env, cfg), "http://127.0.0.1:9")
+        self.assertEqual(publish.api_key(env, cfg, d), "k-env")  # command never runs
+
+
 class ImageTest(unittest.TestCase):
     def test_long_and_non_latin_titles_render(self):
         for title in ("A very long title " * 8, "दिवाली नोट्स", ""):
