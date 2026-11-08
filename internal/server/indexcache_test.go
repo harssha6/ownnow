@@ -18,13 +18,23 @@ import (
 // tests see the cost R2 round trips have in production.
 type slowStore struct {
 	store.Store
-	delay time.Duration
-	gets  atomic.Int64
+	delay  time.Duration
+	gets   atomic.Int64
+	active atomic.Int64
+	peak   atomic.Int64
 }
 
 func (s *slowStore) Get(ctx context.Context, key string) (io.ReadCloser, int64, string, error) {
 	if strings.HasPrefix(key, "_meta/") {
 		s.gets.Add(1)
+		active := s.active.Add(1)
+		defer s.active.Add(-1)
+		for {
+			peak := s.peak.Load()
+			if active <= peak || s.peak.CompareAndSwap(peak, active) {
+				break
+			}
+		}
 		time.Sleep(s.delay)
 	}
 	return s.Store.Get(ctx, key)
@@ -50,12 +60,12 @@ func TestRobotsReadsInParallelAndCaches(t *testing.T) {
 		publish(t, ts, fmt.Sprintf("site-%02d", i), map[string]string{"index.html": "x"}, extra)
 	}
 	st.gets.Store(0)
-	start := time.Now()
+	st.peak.Store(0)
 	_, robots := get(t, ts, "/robots.txt")
-	cold := time.Since(start)
-	// serial loadSite read 2 objects per site: 60 x 20ms = 1.2s
-	if cold > 500*time.Millisecond {
-		t.Fatalf("cold robots.txt took %v; reads are not parallel", cold)
+	// Prove concurrent metadata reads directly: elapsed-time thresholds fail
+	// under CPU contention even when reads overlap correctly.
+	if peak := st.peak.Load(); peak < 2 {
+		t.Fatalf("cold robots.txt peak concurrent reads = %d; want at least 2", peak)
 	}
 	if n := st.gets.Load(); n > 40 { // 30 site JSONs + 10 password sidecars
 		t.Fatalf("cold robots.txt did %d metadata reads", n)
@@ -64,10 +74,9 @@ func TestRobotsReadsInParallelAndCaches(t *testing.T) {
 		t.Fatalf("robots.txt:\n%s", robots)
 	}
 	st.gets.Store(0)
-	start = time.Now()
 	_, sm := get(t, ts, "/sitemap.xml")
-	if warm := time.Since(start); st.gets.Load() != 0 || warm > 100*time.Millisecond {
-		t.Fatalf("warm sitemap.xml: %d reads in %v, want 0 reads", st.gets.Load(), warm)
+	if reads := st.gets.Load(); reads != 0 {
+		t.Fatalf("warm sitemap.xml: %d reads, want 0 reads", reads)
 	}
 	if got := strings.Count(sm, "<loc>"); got != 10 {
 		t.Fatalf("sitemap lists %d sites, want 10:\n%s", got, sm)

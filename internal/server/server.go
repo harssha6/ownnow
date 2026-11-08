@@ -19,9 +19,11 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"ownnow/internal/store"
@@ -56,7 +58,8 @@ type Site struct {
 	// Indexable is a tri-state search-indexing switch. nil = never set
 	// (served exactly as before), false = every response for the slug carries
 	// X-Robots-Tag noindex, true = no header and the site joins /sitemap.xml.
-	Indexable *bool `json:"indexable,omitempty"`
+	Indexable   *bool `json:"indexable,omitempty"`
+	NoAnalytics bool  `json:"noAnalytics,omitempty"`
 }
 
 type Config struct {
@@ -70,13 +73,19 @@ type Config struct {
 	PresignedUploads bool
 	// IndexCacheTTL: how long robots.txt and sitemap.xml reuse the list of
 	// indexable sites. 0 = DefaultIndexCacheTTL, negative = no cache.
-	IndexCacheTTL time.Duration
+	IndexCacheTTL   time.Duration
+	DisableCounting bool
+	Analytics       AnalyticsConfig
+	TrustedProxies  []netip.Prefix
+	EdgeStatsKey    string
 }
 
 type Server struct {
-	cfg Config
-	mux *http.ServeMux
-	idx indexCache
+	cfg         Config
+	mux         *http.ServeMux
+	idx         indexCache
+	statsMu     sync.Mutex
+	statsWriter string
 }
 
 func New(cfg Config) *Server {
@@ -85,7 +94,7 @@ func New(cfg Config) *Server {
 		_, _ = rand.Read(b)
 		cfg.Secret = b
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), statsWriter: randID("writer_")}
 	s.routes()
 	return s
 }
@@ -107,6 +116,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/publish/{slug}/files", s.files)
 	m.HandleFunc("POST /api/v1/publish/{slug}/unlock", s.unlock)
 	m.HandleFunc("GET /api/v1/publishes", s.list)
+	m.HandleFunc("GET /api/v1/publishes/{slug}/stats", s.stats)
+	m.HandleFunc("POST /api/v1/publishes/{slug}/stats/edge", s.edgeStats)
 	m.HandleFunc("/", s.serveSite) // catch-all: subdomain, /{slug}/..., /robots.txt, /sitemap.xml
 }
 
@@ -236,6 +247,7 @@ type createReq struct {
 	DisplayName string      `json:"displayName,omitempty"`
 	Description string      `json:"displayDescription,omitempty"`
 	Indexable   *bool       `json:"indexable,omitempty"`
+	NoAnalytics *bool       `json:"noAnalytics,omitempty"`
 }
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {
@@ -289,6 +301,9 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		site.PasswordHash = hashStr(req.Password)
 	}
 	site.SPA, site.COI = req.SPA, req.COI
+	if req.NoAnalytics != nil {
+		site.NoAnalytics = *req.NoAnalytics
+	}
 	if req.DisplayName != "" {
 		site.DisplayName = req.DisplayName
 	}
@@ -545,6 +560,19 @@ func (s *Server) deleteSite(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "forbidden")
 		return
 	}
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
+	statsObjs, err := s.cfg.Store.List(r.Context(), "_meta/stats/"+slug+"/")
+	if err != nil {
+		fail(w, 500, "could not delete stats")
+		return
+	}
+	for _, o := range statsObjs {
+		if err := s.cfg.Store.Delete(r.Context(), o.Key); err != nil {
+			fail(w, 500, "could not delete stats")
+			return
+		}
+	}
 	objs, _ := s.cfg.Store.List(r.Context(), "sites/"+slug+"/")
 	for _, o := range objs {
 		_ = s.cfg.Store.Delete(r.Context(), o.Key)
@@ -673,14 +701,14 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	// exact file?
 	for _, f := range cur.Files {
 		if f.Path == rest {
-			s.serveFile(w, r, slug, cur.ID, f)
+			s.serveFile(w, r, site, cur.ID, f)
 			return
 		}
 	}
 	// directory index: rest + "/index.html"
 	for _, f := range cur.Files {
 		if f.Path == strings.TrimSuffix(rest, "/")+"/index.html" {
-			s.serveFile(w, r, slug, cur.ID, f)
+			s.serveFile(w, r, site, cur.ID, f)
 			return
 		}
 	}
@@ -693,17 +721,18 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(htmls) == 1 {
-			s.serveFile(w, r, slug, cur.ID, htmls[0])
+			s.serveFile(w, r, site, cur.ID, htmls[0])
 			return
 		}
 		// no index at all -> directory listing (here.now does this for file bundles)
-		s.listing(w, site, cur)
+		s.listing(w, r, site, cur)
+		s.countRequest(r, slug, false)
 		return
 	}
 	if site.SPA {
 		for _, f := range cur.Files {
 			if f.Path == "index.html" {
-				s.serveFile(w, r, slug, cur.ID, f)
+				s.serveFile(w, r, site, cur.ID, f)
 				return
 			}
 		}
@@ -714,9 +743,15 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 			rc, _, _, err := s.cfg.Store.Get(r.Context(), s.fileKey(slug, cur.ID, f.Path))
 			if err == nil {
 				defer rc.Close()
+				data, err := io.ReadAll(rc)
+				if err != nil {
+					http.Error(w, "could not read file", 500)
+					return
+				}
+				data = s.injectHTML(w, r, site, data)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusNotFound)
-				_, _ = io.Copy(w, rc)
+				_, _ = w.Write(data)
 				return
 			}
 		}
@@ -724,17 +759,22 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func (s *Server) listing(w http.ResponseWriter, site *Site, v *Version) {
+func (s *Server) listing(w http.ResponseWriter, r *http.Request, site *Site, v *Version) {
+	var body strings.Builder
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!doctype html><title>%s</title><h1>%s</h1><ul>`, html.EscapeString(site.Slug), html.EscapeString(site.Slug))
+	fmt.Fprintf(&body, `<!doctype html><title>%s</title><h1>%s</h1><ul>`, html.EscapeString(site.Slug), html.EscapeString(site.Slug))
 	for _, f := range v.Files {
-		fmt.Fprintf(w, `<li><a href="%s">%s</a> (%d bytes)</li>`, html.EscapeString(f.Path), html.EscapeString(f.Path), f.Size)
+		fmt.Fprintf(&body, `<li><a href="%s">%s</a> (%d bytes)</li>`, html.EscapeString(f.Path), html.EscapeString(f.Path), f.Size)
 	}
-	fmt.Fprint(w, `</ul>`)
+	fmt.Fprint(&body, `</ul>`)
+	if !s.cfg.DisableCounting {
+		w.Header().Set("Cache-Control", "private, no-cache")
+	}
+	_, _ = w.Write(s.injectHTML(w, r, site, []byte(body.String())))
 }
 
-func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, slug, version string, f FileEntry) {
-	rc, _, _, err := s.cfg.Store.Get(r.Context(), s.fileKey(slug, version, f.Path))
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, site *Site, version string, f FileEntry) {
+	rc, _, _, err := s.cfg.Store.Get(r.Context(), s.fileKey(site.Slug, version, f.Path))
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -755,14 +795,25 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, slug, version
 	if ct == "" {
 		ct = http.DetectContentType(data)
 	}
+	isHTML := strings.EqualFold(strings.Split(ct, ";")[0], "text/html")
+	if isHTML {
+		data = s.injectHTML(w, r, site, data)
+	}
 	w.Header().Set("Content-Type", ct)
 	if strings.HasSuffix(f.Path, ".wasm") {
 		w.Header().Set("Cache-Control", "no-cache") // here.now parity: wasm revalidates
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=60")
 	}
+	if !s.cfg.DisableCounting {
+		w.Header().Set("Cache-Control", "private, no-cache")
+	}
 	w.Header().Set("ETag", `"`+hashStr(string(data))[:16]+`"`)
-	http.ServeContent(w, r, f.Path, time.Time{}, strings.NewReader(string(data))) // gives Range support
+	cw := &statsStatusWriter{ResponseWriter: w, status: 200}
+	http.ServeContent(cw, r, f.Path, time.Time{}, strings.NewReader(string(data))) // gives Range support
+	if cw.status == 200 || cw.status == 206 || cw.status == 304 {
+		s.countRequest(r, site.Slug, !isHTML)
+	}
 }
 
 // ---------- search indexing ----------

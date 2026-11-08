@@ -18,3 +18,12 @@ BASE_DOMAIN = "example.com"
 [[r2_buckets]]
 binding = "SITES"
 bucket_name = "ownnow"
+
+# To count Worker traffic (including cache hits), keep the Go server running
+# against this R2 bucket. Add these to [vars] above, not to [[r2_buckets]]:
+# STATS_ORIGIN = "https://control.example.com"
+# COUNTING = "true"
+# ANALYTICS = '{"provider":"umami","scriptUrl":"https://metrics.example/script.js","websiteId":"YOUR-ID"}'
+# Set secrets separately (never commit them):
+#   bunx wrangler secret put STATS_KEY     # Go OWNNOW_EDGE_STATS_KEY
+#   bunx wrangler secret put STATS_SECRET  # Go OWNNOW_SECRET

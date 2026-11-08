@@ -1,3 +1,5 @@
+import { reportHit, injectAnalytics, type StatsEnv } from "./analytics";
+
 /**
  * ownnow edge Worker — the ONLY public serving path. Files are served from
  * R2 (zero egress fees) behind the Cloudflare cache. No Vercel, no origin.
@@ -10,7 +12,7 @@
  * Run/deploy with Bun:  bun install && bunx wrangler dev | deploy
  */
 
-export interface Env {
+export interface Env extends StatsEnv {
   SITES: R2Bucket;
   BASE_DOMAIN: string;
 }
@@ -22,6 +24,7 @@ type SiteMeta = {
   crossOriginIsolation?: boolean;
   expiresAt?: string;
   indexable?: boolean;
+  noAnalytics?: boolean;
 };
 type SiteSecrets = { PasswordHash?: string };
 
@@ -44,6 +47,7 @@ async function sha256Hex(s: string): Promise<string> {
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
+    if (!["GET", "HEAD", "POST"].includes(req.method)) return new Response("method not allowed", { status: 405 });
     if (url.pathname === "/healthz") return Response.json({ ok: true, edge: true, serving: "r2" });
 
     // --- slug resolution: {slug}.BASE_DOMAIN, else /{slug}/... ---
@@ -96,35 +100,50 @@ export default {
       }
     }
 
+    if (req.method === "POST") return new Response("method not allowed", { status: 405 });
+
+    const finish = async (res: Response): Promise<Response> => {
+      ctx.waitUntil(reportHit(req,env,slug,rest,res));
+      const injected = await injectAnalytics(res,req,env,site.noAnalytics);
+      const result = new Response(injected.body, injected);
+      if (env.COUNTING !== "false") result.headers.set("Cache-Control", "private, no-cache");
+      return result;
+    };
+
     const prefix = `sites/${slug}/${site.currentVersion}/`;
     const wanted = rest === "" ? "index.html" : rest;
 
     // versioned R2 keys are immutable -> cache aggressively at the edge
     const cache = (caches as unknown as { default: Cache }).default;
-    const cacheKey = new Request(url.toString(), req);
-    const hit = await cache.match(cacheKey);
-    if (hit) return hit;
+    const cacheURL = new URL(url);
+    cacheURL.searchParams.set("__ownnow_version", site.currentVersion);
+    const cacheKey = new Request(cacheURL, req);
+    const hit = !secrets.PasswordHash && req.method === "GET" ? await cache.match(cacheKey) : undefined;
+    if (hit) return finish(hit);
 
-    let obj = await env.SITES.get(prefix + wanted);
+    let servedPath = wanted;
+    let obj = await env.SITES.get(prefix + servedPath);
     let status = 200;
     if (!obj && wanted !== "index.html") {
-      obj = await env.SITES.get(`${prefix}${wanted.replace(/\/$/, "")}/index.html`);
+      servedPath = wanted.endsWith("/") ? wanted+"index.html" : wanted+"/index.html";
+      obj = await env.SITES.get(prefix+servedPath);
     }
-    if (!obj && site.spa) obj = await env.SITES.get(prefix + "index.html");
+    if (!obj && site.spa) { servedPath = "index.html"; obj = await env.SITES.get(prefix+servedPath); }
     if (!obj) {
-      obj = await env.SITES.get(prefix + "404.html");
+      servedPath = "404.html";
+      obj = await env.SITES.get(prefix+servedPath);
       status = 404;
     }
     if (!obj) return new Response("not found", { status: 404, headers });
 
     obj.writeHttpMetadata(headers);
-    headers.set("Content-Type", contentType(wanted));
+    headers.set("Content-Type", contentType(servedPath));
     headers.set("ETag", obj.httpEtag);
     // here.now parity: wasm revalidates, everything else sits in cache
     headers.set("Cache-Control", wanted.endsWith(".wasm") ? "no-cache" : "public, max-age=60");
 
     const res = new Response(req.method === "HEAD" ? null : obj.body, { status, headers });
-    if (status === 200 && req.method === "GET") ctx.waitUntil(cache.put(cacheKey, res.clone()));
-    return res;
+    if (!secrets.PasswordHash && status === 200 && req.method === "GET") ctx.waitUntil(cache.put(cacheKey, res.clone()));
+    return finish(res);
   },
 };
