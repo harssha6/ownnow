@@ -1,0 +1,8 @@
+{
+  "analytics": {
+    "provider": "umami",
+    "scriptUrl": "https://umami.harssha.design/script.js",
+    "websiteId": "f8917691-72ac-4458-87eb-c93d7298c6c8",
+    "domain": "now.harssha.design"
+  }
+}
