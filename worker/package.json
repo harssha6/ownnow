@@ -5,11 +5,14 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "test": "bun test ./tests",
+    "check": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261027.1",
     "typescript": "^5.7.0",
     "wrangler": "^4.0.0"
-  }
+  },
+  "description": "Optional Cloudflare serving for ownnow: R2 files, cookie-free stats bridge and opt-in tracker injection."
 }

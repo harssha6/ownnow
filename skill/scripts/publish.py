@@ -3,13 +3,17 @@
 
 Usage:
   publish.py <file-or-dir> [--slug NAME] [--password PW] [--ttl-hours N] [--spa]
-             [--index | --noindex] [--no-share-preview] [--title T] [--description D]
+             [--index | --noindex] [--analytics | --no-analytics] [--no-share-preview] [--title T] [--description D]
 
 Search: a NEW site is noindex unless you pass --index. Republishing an
 existing slug keeps its setting unless you pass --index or --noindex.
 Share previews: HTML pages get og:*, twitter:card, canonical and a
 generated 1200x630 og image wherever the page has none. Tags you wrote
 are never changed. --no-share-preview uploads your files untouched.
+
+Stats: python3 scripts/stats.py <slug> --days 7 prints server counts as JSON.
+--no-analytics skips optional server-injected trackers; --analytics re-enables
+injection. Omitted flags preserve the publish setting. Server counting stays on.
 
 Server and key: env OWNNOW_SERVER / OWNNOW_API_KEY win; otherwise the
 optional local/config.json next to SKILL.md supplies "server" and a
@@ -50,9 +54,14 @@ SERVER = server_url()
 
 
 def call(method, path, key, body=None, data=None, ctype="application/json"):
+    headers = {"Content-Type": ctype}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    if os.environ.get("OWNNOW_CLAIM"):
+        headers["X-OwnNow-Claim"] = os.environ["OWNNOW_CLAIM"]
     req = urllib.request.Request(SERVER + path, data=data if data is not None else (
         json.dumps(body).encode() if body is not None else None), method=method,
-        headers={"Authorization": "Bearer " + key, "Content-Type": ctype})
+        headers=headers)
     with urllib.request.urlopen(req, timeout=600) as r:
         return json.load(r) if r.headers.get_content_type() == "application/json" else r.read()
 
@@ -134,16 +143,19 @@ def existing_site(slug, key):
 
 def main():
     args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print(__doc__)
+        return
     opts, pos = {}, []
     i = 0
     while i < len(args):
         if args[i] in ("--slug", "--password", "--ttl-hours", "--title", "--description"):
             opts[args[i][2:]] = args[i + 1]; i += 2
-        elif args[i] in ("--spa", "--index", "--noindex", "--no-share-preview"):
+        elif args[i] in ("--spa", "--index", "--noindex", "--no-share-preview", "--analytics", "--no-analytics"):
             opts[args[i][2:]] = True; i += 1
         else:
             pos.append(args[i]); i += 1
-    if not pos or (opts.get("index") and opts.get("noindex")):
+    if not pos or (opts.get("index") and opts.get("noindex")) or (opts.get("analytics") and opts.get("no-analytics")):
         sys.exit(__doc__)
     target = pathlib.Path(pos[0]).expanduser()
     files = collect(target)
@@ -169,6 +181,8 @@ def main():
     body = {"files": [{"path": p, "size": sizes.get(p, 0),
                        "contentType": mimetypes.guess_type(p)[0] or "application/octet-stream"} for p in paths],
             "spa": bool(opts.get("spa"))}
+    if "analytics" in opts or "no-analytics" in opts:
+        body["noAnalytics"] = bool(opts.get("no-analytics"))
     if send_indexable is not None: body["indexable"] = send_indexable
     if opts.get("password"): body["password"] = opts["password"]
     if opts.get("ttl-hours"): body["ttlHours"] = int(opts["ttl-hours"])

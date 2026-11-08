@@ -73,3 +73,14 @@ func TestInjectionServingAndOptOut(t *testing.T) {
 		t.Fatal("noAnalytics should only disable injection", got)
 	}
 }
+
+func TestUmamiDomainFilter(t *testing.T) {
+	a := AnalyticsConfig{Provider: "umami", ScriptURL: "https://metrics.example/script.js", WebsiteID: "id", Domain: "pages.example"}
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	out := string(a.inject([]byte("<head></head>")))
+	if !strings.Contains(out, `data-domains="pages.example"`) {
+		t.Fatal(out)
+	}
+}

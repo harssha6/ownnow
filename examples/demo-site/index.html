@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ownnow · Self-hosted publishing on your own domain</title>
-<meta name="description" content="Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.">
+<meta name="description" content="Publish pages, PDFs and files on your own domain. Count views and file opens in your own storage. One Go binary, open source and MIT licensed.">
 <link rel="canonical" href="https://ownnow.dev/">
 <meta name="author" content="Harssha Vardan">
 <meta name="theme-color" content="#f2ede3">
@@ -16,14 +16,14 @@
 <meta property="og:site_name" content="ownnow">
 <meta property="og:url" content="https://ownnow.dev/">
 <meta property="og:title" content="ownnow · Your agent ships it. You own the link.">
-<meta property="og:description" content="Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.">
+<meta property="og:description" content="Publish pages, PDFs and files on your own domain. Count views and file opens in your own storage. One Go binary, open source and MIT licensed.">
 <meta property="og:image" content="https://ownnow.dev/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="ownnow: Your agent ships it. You own the link. A grid of bold geometric tiles.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ownnow · Your agent ships it. You own the link.">
-<meta name="twitter:description" content="Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.">
+<meta name="twitter:description" content="Publish pages, PDFs and files on your own domain. Count views and file opens in your own storage. One Go binary, open source and MIT licensed.">
 <meta name="twitter:image" content="https://ownnow.dev/og.png">
 <script type="application/ld+json">
 {
@@ -31,7 +31,7 @@
   "@type": "SoftwareApplication",
   "name": "ownnow",
   "url": "https://ownnow.dev/",
-  "description": "Publish a file or folder and get a live URL on your own domain and storage. Open source and self-hosted: one Go binary, MIT licensed.",
+  "description": "Publish pages, PDFs and files on your own domain. Count views and file opens in your own storage. One Go binary, open source and MIT licensed.",
   "image": "https://ownnow.dev/og.png",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS, Windows",
@@ -61,7 +61,7 @@
       "name": "How is it different from here.now?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "here.now is a hosted service. ownnow is software you run yourself, with no accounts, no hosted control plane, and no telemetry. Some here.now features, like email allowlists, analytics, and teams, are not built yet."
+        "text": "here.now is a hosted service. ownnow is software you run yourself, with no accounts, no hosted control plane, and no vendor telemetry. Built-in stats count page views and file opens in your own storage. Email allowlists and teams are not built yet."
       }
     },
     {
@@ -126,6 +126,14 @@
       "acceptedAnswer": {
         "@type": "Answer",
         "text": "Anyone with your API key, and no one else. Without a key, the server runs in anonymous mode: sites expire after 24 hours and a claim token guards updates."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What do stats count and store?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Counts are on by default for the Go server, including direct PDF, image and download opens. Daily rollups store counts, salted visitor hashes, referrer hosts and paths. No raw IPs, raw user agents, analytics cookies, query strings or request logs are stored by the counter. Obvious bots and DNT/GPC requests are excluded. Set OWNNOW_COUNTING=false to stop new counts. Optional tracker injection is off by default; --no-analytics opts a publish out of injection while leaving server counts on. Worker serving needs the documented stats bridge."
       }
     }
   ]
@@ -311,6 +319,17 @@
     .feature:nth-child(even){padding-left:0; border-left:0}
   }
 
+  /* stats */
+  #stats{padding-top:0}
+  .stats-demo{display:grid; grid-template-columns:1fr 1fr; align-items:start; gap:clamp(2rem,5vw,5rem); border-top:2px solid var(--ink); padding-top:clamp(2rem,4vw,3.5rem)}
+  .stats-demo h2{font-size:clamp(2.1rem,4vw,3.8rem); line-height:1.02; margin:1.2rem 0; max-width:13ch}
+  .stats-demo h2 em{color:var(--green)}
+  .stats-demo p + p{margin-top:1rem}
+  .stats-demo .term{position:static; min-width:0; width:100%}
+  .stats-demo .term pre{white-space:pre-wrap; overflow-wrap:anywhere}
+  .stats-note{color:var(--muted); font-size:.94rem}
+  @media (max-width:900px){ .stats-demo{grid-template-columns:1fr} }
+
   /* faq */
   #faq{padding-top:0}
   #faq h2 em{color:var(--blue)}
@@ -373,6 +392,7 @@
     <nav>
       <a href="#how">How it works</a>
       <a href="#self-host">Self-host</a>
+      <a href="#stats">Stats</a>
       <a href="https://github.com/harssha6/ownnow">GitHub ↗</a>
     </nav>
   </div>
@@ -492,7 +512,7 @@
         <p class="label">Auth model</p>
         <div>
           <h2>Deliberately <em>boring.</em></h2>
-          <p class="sub">One bearer key guards publishing. You generate it. No accounts, no hosted control plane, no telemetry. Nothing phones home.</p>
+          <p class="sub">One bearer key guards publishing. You generate it. No accounts or hosted control plane. Built-in stats stay in your storage. Nothing phones home unless you enable an external tracker.</p>
         </div>
       </div>
       <div class="facts reveal">
@@ -523,6 +543,31 @@
     </div>
   </section>
 
+  <section id="stats">
+    <div class="wrap stats-demo reveal">
+      <div>
+        <p class="label">Stats and analytics</p>
+        <h2>See what people <em>open.</em></h2>
+        <p class="sub">Pages, PDFs, images and downloads. Server-side counts catch file opens that a JavaScript tag never sees. No analytics cookies, and your daily rollups stay in your storage.</p>
+        <p class="stats-note">Daily unique visitors, referrer hosts and top paths come with the CLI and authenticated API. File opens are included in views; multi-day uniques sum daily uniques.</p>
+        <p class="stats-note">Counting is on by default. Set <code>OWNNOW_COUNTING=false</code> to stop it. Optional tracker injection is off by default and supports a per-publish <code>--no-analytics</code> switch.</p>
+        <p><a href="https://github.com/harssha6/ownnow/blob/main/docs/stats-and-analytics.md">Stats setup and API →</a></p>
+      </div>
+      <div class="term" aria-label="Illustrative stats command and JSON excerpt">
+        <div class="term-bar"><span class="dots" aria-hidden="true"><i style="background:var(--red)"></i><i style="background:var(--yellow)"></i><i style="background:var(--blue)"></i></span><span class="label">Stats example</span><button class="copy" type="button" data-copy="ownnow stats bright-canvas-a7k2 --days 7">Copy</button></div>
+        <pre><code><span class="p">$</span> ownnow stats bright-canvas-a7k2 --days 7
+
+<span class="c"># Illustrative excerpt from the JSON response</span>
+"totals": {
+  "views": <span class="u">128</span>,
+  "uniqueVisitors": <span class="u">42</span>,
+  "fileOpens": <span class="u">18</span>
+}</code></pre>
+        <div class="term-foot">Daily buckets use UTC. The full response includes a daily series, top referrers and top paths. Cloudflare Worker traffic needs the stats bridge.</div>
+      </div>
+    </div>
+  </section>
+
   <section id="faq">
     <div class="wrap">
       <div class="head reveal">
@@ -536,7 +581,7 @@
         </details>
         <details class="qa">
           <summary><span>How is it different from here.now?</span><i aria-hidden="true"></i></summary>
-          <p>here.now is a hosted service. ownnow is software you run yourself, with no accounts, no hosted control plane, and no telemetry. Some here.now features, like email allowlists, analytics, and teams, are not built yet.</p>
+          <p>here.now is a hosted service. ownnow is software you run yourself, with no accounts, no hosted control plane, and no vendor telemetry. Built-in stats count page views and file opens in your own storage. Email allowlists and teams are not built yet.</p>
         </details>
         <details class="qa">
           <summary><span>Can my AI agent publish to it?</span><i aria-hidden="true"></i></summary>
@@ -565,6 +610,10 @@
         <details class="qa">
           <summary><span>Do shared links get a preview?</span><i aria-hidden="true"></i></summary>
           <p>Yes. When an agent publishes HTML, the skill adds a title, description, canonical link, Open Graph and Twitter tags, and a 1200x630 preview image wherever the page has none. Tags you wrote are never changed. noindex does not hide previews: Slack, X, and iMessage still unfurl the link.</p>
+        </details>
+        <details class="qa">
+          <summary><span>What do stats count and store?</span><i aria-hidden="true"></i></summary>
+          <p>Counts are on by default for the Go server, including direct PDF, image and download opens. Daily rollups store counts, salted visitor hashes, referrer hosts and paths. No raw IPs, raw user agents, analytics cookies, query strings or request logs are stored by the counter. Obvious bots and DNT/GPC requests are excluded. Set OWNNOW_COUNTING=false to stop new counts. Optional tracker injection is off by default; --no-analytics opts a publish out of injection while leaving server counts on. Worker serving needs the documented stats bridge.</p>
         </details>
         <details class="qa">
           <summary><span>Who can publish to my server?</span><i aria-hidden="true"></i></summary>

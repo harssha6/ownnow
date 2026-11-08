@@ -177,7 +177,7 @@ export async function injectAnalytics(
       url.password
     )
       return res;
-    snippet = `<script defer data-ownnow-analytics src="${escapeAttr(a.scriptUrl!)}" ${a.provider === "umami" ? `data-website-id="${escapeAttr(a.websiteId!)}"` : `data-domain="${escapeAttr(a.domain!)}"`}></script>`;
+    snippet = `<script defer data-ownnow-analytics src="${escapeAttr(a.scriptUrl!)}" ${a.provider === "umami" ? `data-website-id="${escapeAttr(a.websiteId!)}"${a.domain ? ` data-domains="${escapeAttr(a.domain)}"` : ""}` : `data-domain="${escapeAttr(a.domain!)}"`}></script>`;
   }
   if (!snippet) return res;
   const source = await res.text();

@@ -48,7 +48,11 @@ func (a AnalyticsConfig) Validate() error {
 func (a AnalyticsConfig) tag() string {
 	switch a.Provider {
 	case "umami":
-		return `<script defer data-ownnow-analytics src="` + html.EscapeString(a.ScriptURL) + `" data-website-id="` + html.EscapeString(a.WebsiteID) + `"></script>`
+		domain := ""
+		if a.Domain != "" {
+			domain = ` data-domains="` + html.EscapeString(a.Domain) + `"`
+		}
+		return `<script defer data-ownnow-analytics src="` + html.EscapeString(a.ScriptURL) + `" data-website-id="` + html.EscapeString(a.WebsiteID) + `"` + domain + `></script>`
 	case "plausible":
 		return `<script defer data-ownnow-analytics src="` + html.EscapeString(a.ScriptURL) + `" data-domain="` + html.EscapeString(a.Domain) + `"></script>`
 	case "custom":
