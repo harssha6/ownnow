@@ -15,13 +15,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"ownnow/internal/server"
@@ -51,6 +55,8 @@ func main() {
 		err = serve()
 	case "publish":
 		err = publish(os.Args[2:])
+	case "stats":
+		err = stats(os.Args[2:])
 	case "list":
 		err = list()
 	case "delete":
@@ -76,12 +82,41 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("ownnow serve | publish [--slug x] [--ttl-hours n] [--password p] [--spa] [--index|--noindex] <file-or-dir> | list | delete <slug> | rollback <slug> <versionId> | version")
+	fmt.Println("ownnow serve | publish [--slug x] [--ttl-hours n] [--password p] [--spa] [--index|--noindex] [--no-analytics] <file-or-dir> | stats <slug> [--days n] | list | delete <slug> | rollback <slug> <versionId> | version")
 }
 
 func serve() error {
+	var config struct {
+		Analytics server.AnalyticsConfig `json:"analytics"`
+	}
+	if file := os.Getenv("OWNNOW_CONFIG"); file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			return err
+		}
+	}
+	if err := config.Analytics.Validate(); err != nil {
+		return err
+	}
+	counting, err := strconv.ParseBool(env("OWNNOW_COUNTING", "true"))
+	if err != nil {
+		return fmt.Errorf("OWNNOW_COUNTING must be true or false")
+	}
+	var proxies []netip.Prefix
+	for _, raw := range strings.Split(os.Getenv("OWNNOW_TRUSTED_PROXIES"), ",") {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Errorf("invalid OWNNOW_TRUSTED_PROXIES CIDR: %w", err)
+		}
+		proxies = append(proxies, prefix)
+	}
 	var st store.Store
-	var err error
 	if env("OWNNOW_STORAGE", "local") == "s3" {
 		st = &store.S3{
 			Endpoint:  os.Getenv("OWNNOW_S3_ENDPOINT"),
@@ -99,14 +134,25 @@ func serve() error {
 		}
 		fmt.Println("storage: local", dir)
 	}
+	secret := []byte(os.Getenv("OWNNOW_SECRET"))
+	if len(secret) == 0 {
+		secret, err = storedSecret(st)
+		if err != nil {
+			return fmt.Errorf("load instance secret: %w", err)
+		}
+	}
 	addr := env("OWNNOW_ADDR", ":8080")
 	srv := server.New(server.Config{
 		Store:            st,
 		APIKey:           os.Getenv("OWNNOW_API_KEY"),
 		BaseDomain:       os.Getenv("OWNNOW_BASE_DOMAIN"),
 		PublicURL:        env("OWNNOW_PUBLIC_URL", "http://127.0.0.1"+addr),
-		Secret:           []byte(os.Getenv("OWNNOW_SECRET")),
+		Secret:           secret,
 		PresignedUploads: env("OWNNOW_STORAGE", "local") == "s3",
+		DisableCounting:  !counting,
+		Analytics:        config.Analytics,
+		TrustedProxies:   proxies,
+		EdgeStatsKey:     os.Getenv("OWNNOW_EDGE_STATS_KEY"),
 	})
 	if os.Getenv("OWNNOW_API_KEY") == "" {
 		fmt.Println("warning: OWNNOW_API_KEY unset — local-dev mode, anyone can publish/mutate")
@@ -125,7 +171,10 @@ func doJSON(method, url string, body any, out any) error {
 		b, _ := json.Marshal(body)
 		rdr = bytes.NewReader(b)
 	}
-	req, _ := http.NewRequest(method, url, rdr)
+	req, err := http.NewRequest(method, url, rdr)
+	if err != nil {
+		return err
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -183,6 +232,7 @@ func publish(args []string) error {
 	spa := false
 	var indexable *bool // nil = leave the server's value alone
 	var target string
+	var noAnalytics *bool
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--slug":
@@ -194,6 +244,12 @@ func publish(args []string) error {
 		case "--ttl-hours":
 			i++
 			fmt.Sscan(args[i], &ttl)
+		case "--no-analytics":
+			v := true
+			noAnalytics = &v
+		case "--analytics":
+			v := false
+			noAnalytics = &v
 		case "--spa":
 			spa = true
 		case "--index", "--noindex":
@@ -229,6 +285,9 @@ func publish(args []string) error {
 		} `json:"uploads"`
 	}
 	body := map[string]any{"files": metas, "password": password, "ttlHours": ttl, "spa": spa}
+	if noAnalytics != nil {
+		body["noAnalytics"] = *noAnalytics
+	}
 	if indexable != nil {
 		body["indexable"] = *indexable
 	}
@@ -298,4 +357,68 @@ func rollback(slug, version string) error {
 	}
 	fmt.Println(out["siteUrl"], "->", out["currentVersion"])
 	return nil
+}
+
+func stats(args []string) error {
+	days := 7
+	slug := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--days" {
+			i++
+			if i == len(args) {
+				return fmt.Errorf("--days requires a number")
+			}
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 1 || n > 365 {
+				return fmt.Errorf("--days must be between 1 and 365")
+			}
+			days = n
+		} else if slug == "" && !strings.HasPrefix(args[i], "-") {
+			slug = args[i]
+		} else {
+			return fmt.Errorf("usage: ownnow stats <slug> [--days N]")
+		}
+	}
+	if slug == "" || strings.ContainsAny(slug, "/?#") {
+		return fmt.Errorf("usage: ownnow stats <slug> [--days N]")
+	}
+	var out server.StatsResponse
+	if err := doJSON("GET", fmt.Sprintf("%s/api/v1/publishes/%s/stats?days=%d", apiBase(), slug, days), nil, &out); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+// Retain the generated key across restarts so daily uniques and existing signed
+// cookies don't reset when OWNNOW_SECRET is omitted in single-binary mode.
+func storedSecret(st store.Store) ([]byte, error) {
+	const key = "_meta/instance-secret"
+	rc, _, _, err := st.Get(context.Background(), key)
+	if err == nil {
+		defer rc.Close()
+		b, err := io.ReadAll(io.LimitReader(rc, 33))
+		if err != nil {
+			return nil, err
+		}
+		if len(b) != 32 {
+			return nil, fmt.Errorf("invalid stored secret")
+		}
+		return b, nil
+	}
+	if !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	if err := st.Put(context.Background(), key, bytes.NewReader(b), int64(len(b)), "application/octet-stream"); err != nil {
+		return nil, err
+	}
+	return b, nil
 }

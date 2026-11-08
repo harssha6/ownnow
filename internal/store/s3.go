@@ -132,27 +132,54 @@ type listResult struct {
 		Key  string `xml:"Key"`
 		Size int64  `xml:"Size"`
 	} `xml:"Contents"`
-	IsTruncated bool `xml:"IsTruncated"`
+	IsTruncated           bool   `xml:"IsTruncated"`
+	NextContinuationToken string `xml:"NextContinuationToken"`
 }
 
 func (s *S3) List(ctx context.Context, prefix string) ([]Object, error) {
-	u := strings.TrimRight(s.Endpoint, "/") + "/" + s.Bucket + "?list-type=2&prefix=" + url.QueryEscape(prefix)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	empty := sha256.Sum256(nil)
-	s.sign(req, hex.EncodeToString(empty[:]))
-	resp, err := s.client().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var lr listResult
-	if err := xml.NewDecoder(resp.Body).Decode(&lr); err != nil {
-		return nil, err
-	}
-	out := make([]Object, 0, len(lr.Contents))
-	for _, c := range lr.Contents {
-		out = append(out, Object{Key: c.Key, Size: c.Size})
+	var out []Object
+	token := ""
+	for {
+		query := url.Values{"list-type": {"2"}, "prefix": {prefix}}
+		if token != "" {
+			query.Set("continuation-token", token)
+		}
+		u := strings.TrimRight(s.Endpoint, "/") + "/" + s.Bucket + "?" + query.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		empty := sha256.Sum256(nil)
+		s.sign(req, hex.EncodeToString(empty[:]))
+		resp, err := s.client().Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode >= 300 {
+			resp.Body.Close()
+			return nil, fmt.Errorf("s3 list: %s", resp.Status)
+		}
+		var lr listResult
+		err = decodeListPage(resp, &lr)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range lr.Contents {
+			out = append(out, Object{Key: c.Key, Size: c.Size})
+		}
+		if !lr.IsTruncated {
+			break
+		}
+		if lr.NextContinuationToken == "" || lr.NextContinuationToken == token {
+			return nil, fmt.Errorf("s3 list: truncated response without a new continuation token")
+		}
+		token = lr.NextContinuationToken
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
+}
+
+func decodeListPage(resp *http.Response, result *listResult) error {
+	defer resp.Body.Close()
+	return xml.NewDecoder(resp.Body).Decode(result)
 }
