@@ -1,0 +1,16 @@
+# HARSSHA INSTANCE ONLY. Generic docker-compose.yml does not load this overlay.
+# OWNNOW_SOURCE must point at the reviewed checkout that will be built.
+services:
+  ownnow:
+    build:
+      context: ${OWNNOW_SOURCE:?Set OWNNOW_SOURCE to the reviewed ownnow checkout}
+    environment:
+      OWNNOW_CONFIG: /etc/ownnow/analytics.json
+      OWNNOW_COUNTING: "true"
+      # Private ownnow-deploy Docker network; verify before deployment.
+      OWNNOW_TRUSTED_PROXIES: "172.21.0.0/16"
+    volumes:
+      - type: bind
+        source: ${OWNNOW_SOURCE:?Set OWNNOW_SOURCE to the reviewed ownnow checkout}/deploy/harssha/analytics.json
+        target: /etc/ownnow/analytics.json
+        read_only: true
