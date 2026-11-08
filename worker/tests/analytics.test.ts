@@ -111,6 +111,7 @@ test("Worker runtime injects once, skips existing and opted-out trackers, serves
           provider: "umami",
           scriptUrl: "https://metrics.example/script.js",
           websiteId: "id",
+          domain: "pages.example",
         }),
       },
     }),
@@ -140,6 +141,7 @@ test("Worker runtime injects once, skips existing and opted-out trackers, serves
     expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
     const html = await res.text();
     expect(html.split("data-ownnow-analytics").length - 1).toBe(1);
+    expect(html.includes('data-domains="pages.example"')).toBe(true);
   }
   for (const [slug, headers] of [
     ["existing", normalHeaders],

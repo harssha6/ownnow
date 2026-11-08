@@ -47,8 +47,22 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	if os.Args[1] == "help" {
+		command := ""
+		if len(os.Args) > 2 {
+			command = os.Args[2]
+		}
+		commandHelp(command)
+		return
+	}
+	if len(os.Args) == 3 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
+		commandHelp(os.Args[1])
+		return
+	}
 	var err error
 	switch os.Args[1] {
+	case "--help", "-h":
+		usage()
 	case "version":
 		fmt.Println("ownnow", Version)
 	case "serve":
@@ -82,7 +96,82 @@ func main() {
 }
 
 func usage() {
-	fmt.Println("ownnow serve | publish [--slug x] [--ttl-hours n] [--password p] [--spa] [--index|--noindex] [--no-analytics] <file-or-dir> | stats <slug> [--days n] | list | delete <slug> | rollback <slug> <versionId> | version")
+	fmt.Print(`ownnow: publish files on your own server and storage.
+
+Usage: ownnow <command> [options]
+
+Commands:
+  serve                         Run the publish API and file server
+  publish <file-or-dir>          Publish or update a site
+  stats <slug> [--days N]        Print totals, daily series, referrers and paths as JSON
+  list                          List publishes
+  delete <slug>                 Delete a publish and its stats
+  rollback <slug> <versionId>    Switch to a saved version
+  version                       Print the binary version
+
+Stats and analytics:
+  Server counting is on by default, including PDF/image/download opens.
+  OWNNOW_COUNTING=false stops new counts; history stays readable.
+  Optional tracker injection is off until OWNNOW_CONFIG enables analytics.
+  publish --no-analytics skips injection; --analytics re-enables it.
+
+Client auth: OWNNOW_SERVER, OWNNOW_API_KEY (or OWNNOW_CLAIM for a site claim).
+Run ownnow help <command> or ownnow <command> --help for details.
+`)
+}
+
+func commandHelp(command string) {
+	switch command {
+	case "stats":
+		fmt.Print(`Usage: ownnow stats <slug> [--days N]
+
+Print the same JSON as GET /api/v1/publishes/<slug>/stats?days=N.
+--days defaults to 7 and accepts 1–365, including today. Daily buckets use UTC.
+Totals include views, uniqueVisitors and fileOpens. File opens are included in
+views; period uniques sum daily uniques. The JSON also contains a daily series,
+top referrer hosts and publish-relative paths.
+
+Set OWNNOW_SERVER and OWNNOW_API_KEY, or OWNNOW_CLAIM for an anonymous site.
+Stats require credentials even when local-dev publishing is unauthenticated.
+`)
+	case "publish":
+		fmt.Print(`Usage: ownnow publish <file-or-dir> [options]
+
+Options:
+  --slug NAME          Update/reserve this slug
+  --password PW        Protect the publish with a password
+  --ttl-hours N        Expire the publish after N hours
+  --spa                Enable single-page-app fallback
+  --index | --noindex  Set search indexing (omitted keeps the current setting)
+  --no-analytics       Disable optional tracker injection for this publish
+  --analytics          Re-enable optional tracker injection for this publish
+
+Omitted analytics flags preserve the publish's setting. Both leave server
+counting on. Tracker injection requires instance config and is off by default.
+Inspect visits afterward with ownnow stats <slug> --days 7.
+`)
+	case "serve":
+		fmt.Print(`Usage: ownnow serve
+
+Run the publish API and file server. Configure through environment variables:
+  OWNNOW_ADDR             Listen address (default :8080)
+  OWNNOW_STORAGE          local (default) or s3
+  OWNNOW_DATA_DIR         Local storage directory (default ./data)
+  OWNNOW_API_KEY          Publishing and stats bearer key
+  OWNNOW_SECRET           Stable instance secret shared by replicas
+  OWNNOW_COUNTING         Built-in counting: true (default) or false
+  OWNNOW_CONFIG           JSON file with an optional analytics block
+  OWNNOW_TRUSTED_PROXIES  Trusted X-Forwarded-For proxy CIDRs, comma-separated
+
+Counting stores daily totals, hashed visitor membership, referrer hosts and
+paths. It stores no raw IPs, user agents, cookies or query strings. DNT/GPC
+requests and obvious bots are excluded. Optional Umami/Plausible/custom tracker
+injection is off by default. See README: Stats and analytics for all settings,
+retention, the API contract and the optional Cloudflare Worker bridge.
+`)
+	default:
+		usage()
+	}
 }
 
 func serve() error {

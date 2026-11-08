@@ -2,11 +2,12 @@
 name: ownnow
 description: >
   Publish files and folders to the web instantly on your own ownnow server.
-  Static hosting for HTML sites, images, PDFs, and any file type. Use when
+  Static hosting and privacy-conscious visit stats for HTML sites, images, PDFs,
+  and any file type. Use when
   asked to "publish this", "host this", "deploy this", "share this on the
   web", "make a website", "put this online", "upload to the web",
   "create a webpage", "share a link", "serve this site", or
-  "generate a URL". Outputs a live, shareable URL from your ownnow instance.
+  "generate a URL", "show publish stats", or "how many people opened this". Outputs a live, shareable URL from your ownnow instance.
 ---
 
 # ownnow
@@ -43,7 +44,7 @@ override the generic text in this file.**
 
 ```bash
 python3 scripts/publish.py {file-or-dir} [--slug name] [--password pw] [--ttl-hours n] [--spa] \
-  [--index | --noindex] [--no-share-preview] [--title t] [--description d]
+  [--index | --noindex] [--analytics | --no-analytics] [--no-share-preview] [--title t] [--description d]
 ```
 
 Prints the live URL (e.g. `https://now.example.com/bright-canvas-a7k2/`).
@@ -108,11 +109,52 @@ speed. Deleting the site drops it too, more slowly.
 
 noindex is not privacy. Link previews still render, and anyone with the URL
 can open the page. Use `--password` for that (a locked page shows no preview).
+## Stats and analytics
+
+Built-in server counting is on by default and includes direct PDF, image and
+download opens. It stores daily rollups in the instance's existing storage:
+counts, daily salted hashes of IP + User-Agent for exact deduplication,
+referrer hosts and paths. It stores no raw IPs, raw user agents, cookies,
+queries, full referrer URLs, raw events or per-request timestamps. Browser
+subresources, HEADs, errors, obvious bots and DNT/GPC requests are excluded.
+Multi-range downloads can count more than once. Daily buckets use UTC; period
+uniques sum daily uniques. Rollups remain until site deletion, manual removal
+or an operator's object-store lifecycle rule.
+
+Read stats without publishing or changing the site:
+
+```bash
+python3 scripts/stats.py <slug> --days 7
+# Or, with the Go binary installed:
+ownnow stats <slug> --days 7
+```
+
+Both return JSON with `totals` (`views`, `uniqueVisitors`, `fileOpens`), `series`,
+`topReferrers` (`host`, `views`) and `topPaths` (`path`, `views`). File opens are
+a subset of views. `days` defaults to 7 and accepts 1–365. Missing dates are
+zero-filled. Stats use the publishing key or `OWNNOW_CLAIM`, even in local-dev
+mode. Keys/claims stay in environment or the local overlay, never in page HTML.
+
+Optional server-injected Umami/Plausible/custom trackers are off by default.
+An operator can enable them through `OWNNOW_CONFIG`; existing tracker tags skip
+injection. `publish.py --no-analytics` opts this publish out; `--analytics`
+re-enables injection. Omitted flags preserve the setting. These flags **leave
+built-in counting on** and do not remove trackers already in uploaded HTML.
+Only the operator's `OWNNOW_COUNTING=false` stops new server counts, keeping
+history readable. Unset `OWNNOW_CONFIG` or remove its `analytics` block to stop
+instance-wide injection. Do not add or remove instance trackers without an
+explicit user request.
+
+The optional Cloudflare Worker needs its stats bridge configured before its
+traffic appears here. Full setup and API contract: `docs/stats-and-analytics.md`
+in the repository. The runnable HTML/PDF walkthrough is `examples/stats-demo/`.
+
 ## Manage
 
 With `OWNNOW_API_KEY` set, against `$OWNNOW_SERVER/api/v1`:
 
 - `GET /publishes`: list sites
+- `GET /publishes/{slug}/stats?days=7`: authenticated stats (read-only)
 - `GET /publish/{slug}` / `GET /publish/{slug}/versions`: detail, history
 - `POST /publish/{slug}/rollback {"versionId":"v_..."}`: roll back
 - `PATCH /publish/{slug}/metadata`: name, password, TTL, SPA mode, `indexable` (true, false, or null to unset)
