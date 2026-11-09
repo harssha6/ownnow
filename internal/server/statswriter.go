@@ -13,6 +13,7 @@ const statsQueueSize = 1024
 const statsActiveShards = 32
 const statsShardVisitors = 1024
 const statsBatchSize = 256
+const statsRememberedShards = 4096
 
 type statsHit struct {
 	slug, day, visitor, path, referrer string
@@ -25,10 +26,11 @@ type statsCommand struct {
 	stop bool
 }
 type statsShard struct {
-	hit    statsHit
-	key    string
-	rollup dailyRollup
-	dirty  bool
+	hit      statsHit
+	key      string
+	rollup   dailyRollup
+	dirty    bool
+	lastUsed uint64
 }
 
 // Generation namespaces keep a deleted slug's delayed writes on other replicas
@@ -117,6 +119,25 @@ func (s *Server) runStats() {
 	defer ticker.Stop()
 	active := map[string]*statsShard{}
 	pending := 0
+	var clock uint64
+	type location struct {
+		key  string
+		used uint64
+	}
+	locations := map[string]location{}
+	remember := func(id, key string) {
+		if _, ok := locations[id]; !ok && len(locations) >= statsRememberedShards {
+			oldest := ""
+			var age uint64
+			for candidate, entry := range locations {
+				if oldest == "" || entry.used < age {
+					oldest, age = candidate, entry.used
+				}
+			}
+			delete(locations, oldest)
+		}
+		locations[id] = location{key: key, used: clock}
+	}
 	flush := func() error {
 		var first error
 		for id, shard := range active {
@@ -125,6 +146,9 @@ func (s *Server) runStats() {
 					first = err
 				}
 				// Failed writes never hold an unbounded retry backlog.
+				delete(active, id)
+				delete(locations, id)
+			} else if !shard.dirty && shard.hit.day < time.Now().UTC().Format(time.DateOnly) {
 				delete(active, id)
 			}
 		}
@@ -147,30 +171,59 @@ func (s *Server) runStats() {
 				continue
 			}
 			hit := *cmd.hit
+			clock++
 			id := statsPrefix(hit.slug, hit.generation) + hit.day
 			shard := active[id]
-			if shard != nil && (len(shard.rollup.Visitors) >= statsShardVisitors && !shard.rollup.Visitors[hit.visitor]) {
-				if err := s.flushShard(shard); err != nil {
-					log.Print("ownnow: could not persist analytics rollup")
-				}
-				delete(active, id)
-				shard = nil
-			}
 			if shard == nil {
 				if len(active) >= statsActiveShards {
-					// Seal one bounded shard. A later hit starts a new object; stats reads
-					// union hashes across all shards so eviction never approximates uniques.
-					for old, entry := range active {
-						if err := s.flushShard(entry); err != nil {
-							log.Print("ownnow: could not persist analytics rollup")
+					// Prefer clean/past-day entries, then the least recently used. Remember
+					// the object key so a busy publish resumes it instead of creating a shard
+					// on every cache miss. Only the background writer does these reads.
+					oldest := ""
+					today := time.Now().UTC().Format(time.DateOnly)
+					for candidate, entry := range active {
+						if oldest == "" {
+							oldest = candidate
+							continue
 						}
-						delete(active, old)
-						break
+						best := active[oldest]
+						past, bestPast := entry.hit.day < today, best.hit.day < today
+						if (past && !bestPast) || (past == bestPast && ((!entry.dirty && best.dirty) || (entry.dirty == best.dirty && entry.lastUsed < best.lastUsed))) {
+							oldest = candidate
+						}
 					}
+					entry := active[oldest]
+					if err := s.flushShard(entry); err != nil {
+						log.Print("ownnow: could not persist analytics rollup")
+						delete(locations, oldest)
+					} else {
+						remember(oldest, entry.key)
+					}
+					delete(active, oldest)
+				}
+				shard = &statsShard{hit: hit, key: id + "/" + s.statsWriter + "_" + randID("") + ".json", rollup: newRollup()}
+				if previous, ok := locations[id]; ok {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					roll, err := s.readRollup(ctx, previous.key)
+					cancel()
+					if err != nil {
+						log.Print("ownnow: could not read analytics rollup")
+						delete(locations, id)
+						continue
+					}
+					shard.key, shard.rollup = previous.key, roll
+				}
+				active[id] = shard
+			}
+			if len(shard.rollup.Visitors) >= statsShardVisitors && !shard.rollup.Visitors[hit.visitor] {
+				if err := s.flushShard(shard); err != nil {
+					log.Print("ownnow: could not persist analytics rollup")
 				}
 				shard = &statsShard{hit: hit, key: id + "/" + s.statsWriter + "_" + randID("") + ".json", rollup: newRollup()}
 				active[id] = shard
 			}
+			shard.lastUsed = clock
+			remember(id, shard.key)
 			shard.rollup.Views++
 			if hit.file {
 				shard.rollup.FileOpens++

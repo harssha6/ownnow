@@ -123,7 +123,7 @@ func referrerHost(raw string) string {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || (u.Hostname() == "" || len(u.Hostname()) > 253) {
 		return ""
 	}
-	return strings.ToLower(u.Hostname())
+	return strings.Clone(strings.ToLower(u.Hostname()))
 }
 func (s *Server) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

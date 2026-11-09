@@ -61,7 +61,10 @@ in the existing store. Each server
 writes separate daily shards, and reads merge them without double-counting
 daily visitors. A shard holds at most 1,024 visitor hashes, then rotates; exact
 uniques come from the union of all daily shards. At most 32 shards are active
-in memory. Path/referrer maps keep 1,000 entries plus an `(other)` bucket per
+in memory. A separate bounded index remembers 4,096 shard keys so evicted
+publish-days resume their last object; clean/past-day entries are evicted first,
+then the least recently used. Exceeding the index can create extra shards.
+Path/referrer maps keep 1,000 entries plus an `(other)` bucket per
 shard. Historical storage and authenticated stats scans grow with traffic.
 The generation namespace prevents delayed writes for a deleted publish from
 appearing in a replacement that reuses its slug. On multiple replicas, a write
@@ -95,8 +98,9 @@ instance-wide. `--no-analytics` disables injection for one publish, while
 While counting is on, browsers revalidate documents, images and downloads
 (`private, no-cache`) so repeat opens reach the server; conditional 304 requests
 count too. CSS, JavaScript, fonts, JSON and Wasm retain their normal asset cache
-headers. Each dirty batch writes bounded rollups; authenticated stats queries
-scan history. This is a small-instance counter, not a data warehouse.
+headers. Dirty batches write bounded rollups; a working set over 32 active publish-days
+can require background reads and eviction writes per admission. Public responses
+still never wait on these operations; authenticated stats queries scan history. This is a small-instance counter, not a data warehouse.
 
 **Behind a proxy:** forwarded headers are ignored by default. Set
 `OWNNOW_TRUSTED_PROXIES` to comma-separated proxy CIDRs, for example

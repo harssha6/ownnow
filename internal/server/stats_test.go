@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"ownnow/internal/store"
 )
@@ -406,5 +408,54 @@ func TestUntrustedForwardedIPWarnsWithoutLeakingAddress(t *testing.T) {
 	s.clientIP(r)
 	if strings.Count(output.String(), "OWNNOW_TRUSTED_PROXIES") != 1 || strings.Contains(output.String(), "203.0.113.123") || strings.Contains(output.String(), "127.0.0.1") {
 		t.Fatal(output.String())
+	}
+}
+
+func TestReferrerHostDoesNotRetainFullHeader(t *testing.T) {
+	raw := "https://lower.example/private?token=" + strings.Repeat("x", 900<<10)
+	host := referrerHost(raw)
+	if host != "lower.example" {
+		t.Fatal(host)
+	}
+	// Ownership matters here: a short substring must not pin a near-1MB header
+	// in the long-lived rollup. Pointer ranges prove this without flaky GC timing.
+	start := uintptr(unsafe.Pointer(unsafe.StringData(raw)))
+	ptr := uintptr(unsafe.Pointer(unsafe.StringData(host)))
+	if ptr >= start && ptr < start+uintptr(len(raw)) {
+		t.Error("hostname retains the full Referer allocation")
+	}
+	runtime.KeepAlive(raw)
+}
+func TestActiveShardEvictionResumesExistingRollups(t *testing.T) {
+	s, st := statsFixture(t, nil)
+	generation := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 40; i++ {
+		site := &Site{Slug: fmt.Sprintf("publish-%d", i), CreatedAt: generation, Current: "v1"}
+		if err := s.saveSite(httptest.NewRequest("GET", "/", nil), site); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 1000; i++ {
+		if !s.enqueueStats(statsHit{slug: fmt.Sprintf("publish-%d", i%40), generation: generation, day: time.Now().UTC().Format(time.DateOnly), visitor: fmt.Sprintf("%064d", i/40), path: "/"}) {
+			t.Fatal("queue full")
+		}
+		if i%40 == 39 {
+			if err := s.syncStats(context.Background(), false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := s.syncStats(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	objects, err := st.List(context.Background(), "_meta/stats/")
+	if err != nil || len(objects) != 40 {
+		t.Fatalf("40 publish-days made %d objects: %v", len(objects), err)
+	}
+	for _, object := range objects {
+		roll, err := s.readRollup(context.Background(), object.Key)
+		if err != nil || roll.Views != 25 || len(roll.Visitors) != 25 {
+			t.Fatalf("resumed counts: %+v %v", roll, err)
+		}
 	}
 }
