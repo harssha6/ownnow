@@ -109,7 +109,10 @@ func countable(r *http.Request) bool {
 	// Browser asset fetches aren't visits. Direct PDF/image/download navigation
 	// has destination=document (or no Fetch Metadata, e.g. a CLI download).
 	switch r.Header.Get("Sec-Fetch-Dest") {
-	case "", "empty", "document", "iframe":
+	case "", "empty":
+		mode := r.Header.Get("Sec-Fetch-Mode")
+		return mode == "" || mode == "navigate"
+	case "document", "iframe":
 		return true
 	default:
 		return false
@@ -117,7 +120,7 @@ func countable(r *http.Request) bool {
 }
 func referrerHost(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || (u.Hostname() == "" || len(u.Hostname()) > 253) {
 		return ""
 	}
 	return strings.ToLower(u.Hostname())
@@ -139,6 +142,11 @@ func (s *Server) clientIP(r *http.Request) string {
 			}
 		}
 		return false
+	}
+	if !trusted(peer) && r.Header.Get("X-Forwarded-For") != "" {
+		s.proxyWarning.Do(func() {
+			log.Print("ownnow: forwarded client IP ignored; configure OWNNOW_TRUSTED_PROXIES for accurate daily uniques behind your proxy")
+		})
 	}
 	// Ignore spoofable forwarding headers unless the immediate peer is trusted.
 	if trusted(peer) {
@@ -165,41 +173,29 @@ func boundedIncrement(m map[string]int64, key string) {
 	}
 	m[key]++
 }
-func (s *Server) record(ctx context.Context, slug, day, visitor, p, ref string, file bool) error {
-	s.statsMu.Lock()
-	defer s.statsMu.Unlock()
-	key := "_meta/stats/" + slug + "/" + day + "/" + s.statsWriter + ".json"
-	d, err := s.readRollup(ctx, key)
-	if err != nil {
-		return err
-	}
-	d.Views++
-	if file {
-		d.FileOpens++
-	}
-	d.Visitors[visitor] = true
-	boundedIncrement(d.Paths, p)
-	if ref != "" {
-		boundedIncrement(d.Referrers, ref)
-	}
-	b, err := json.Marshal(d)
-	if err != nil {
-		return err
-	}
-	return s.cfg.Store.Put(ctx, key, strings.NewReader(string(b)), int64(len(b)), "application/json")
-}
-func (s *Server) countRequest(r *http.Request, slug string, file bool) {
+func (s *Server) countRequest(r *http.Request, site *Site, file bool) {
 	if s.cfg.DisableCounting || !countable(r) {
 		return
 	}
 	day := time.Now().UTC().Format(time.DateOnly)
 	_, rest := s.resolveSlug(r)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-	defer cancel()
-	if err := s.record(ctx, slug, day, s.visitorHash(day, slug, s.clientIP(r), r.UserAgent()), "/"+rest, referrerHost(r.Referer()), file); err != nil {
-		// Avoid logging request details (including paths and referrers).
-		log.Print("ownnow: could not persist analytics rollup")
+	if len(rest) > 2047 {
+		rest = "(other)"
 	}
+	s.enqueueStats(statsHit{slug: site.Slug, generation: site.CreatedAt, day: day, visitor: s.visitorHash(day, site.Slug, s.clientIP(r), r.UserAgent()), path: "/" + rest, referrer: referrerHost(r.Referer()), file: file})
+}
+
+// Preserve normal caching for web assets; documents/images/downloads revalidate.
+func revalidateForStats(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if strings.HasPrefix(ct, "font/") {
+		return false
+	}
+	switch ct {
+	case "text/css", "text/javascript", "application/javascript", "application/json", "application/wasm", "application/font-woff", "application/vnd.ms-fontobject":
+		return false
+	}
+	return true
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
@@ -237,11 +233,25 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	}
 	out := StatsResponse{Slug: slug, Days: days, Timezone: "UTC", CountingEnabled: !s.cfg.DisableCounting, Series: []StatsDay{}, TopReferrers: []StatsReferrer{}, TopPaths: []StatsPath{}}
 	refs, paths := map[string]int64{}, map[string]int64{}
+	if err := s.syncStats(r.Context(), false); err != nil {
+		fail(w, 500, "could not flush stats")
+		return
+	}
 	now := time.Now().UTC()
 	// Serialize against this writer so local disk readers never race a write.
 	s.statsMu.Lock()
 	defer s.statsMu.Unlock()
-	prefix := "_meta/stats/" + slug + "/"
+	// Reauthorize after draining the queue: deletion/recreation can change claims.
+	site, err = s.loadSite(r, slug)
+	if err != nil {
+		fail(w, 404, "site not found")
+		return
+	}
+	if !s.authed(r) && (site.ClaimHash == "" || !hmac.Equal([]byte(hashStr(claim)), []byte(site.ClaimHash))) {
+		fail(w, 403, "forbidden")
+		return
+	}
+	prefix := statsPrefix(slug, site.CreatedAt)
 	objects, err := s.cfg.Store.List(r.Context(), prefix)
 	if err != nil {
 		fail(w, 500, "could not read stats")
@@ -314,11 +324,12 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 // Edge requests carry only the daily hash and sanitized dimensions, never IP/UA.
 // A separate shared key limits this endpoint to a trusted serving Worker.
 type edgeHit struct {
-	Date        string `json:"date"`
-	VisitorHash string `json:"visitorHash"`
-	Path        string `json:"path"`
-	Referrer    string `json:"referrer"`
-	File        bool   `json:"file"`
+	Date          string    `json:"date"`
+	VisitorHash   string    `json:"visitorHash"`
+	Path          string    `json:"path"`
+	Referrer      string    `json:"referrer"`
+	File          bool      `json:"file"`
+	SiteCreatedAt time.Time `json:"siteCreatedAt"`
 }
 
 func (s *Server) edgeStats(w http.ResponseWriter, r *http.Request) {
@@ -351,10 +362,11 @@ func (s *Server) edgeStats(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "site not found")
 		return
 	}
-	if err := s.record(r.Context(), slug, hit.Date, strings.ToLower(hit.VisitorHash), hit.Path, hit.Referrer, hit.File); err != nil {
-		fail(w, 500, "could not persist stats")
+	if !site.CreatedAt.Equal(hit.SiteCreatedAt) {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	s.enqueueStats(statsHit{slug: slug, generation: hit.SiteCreatedAt, day: hit.Date, visitor: strings.ToLower(hit.VisitorHash), path: hit.Path, referrer: hit.Referrer, file: hit.File})
 	w.WriteHeader(http.StatusNoContent)
 }
 

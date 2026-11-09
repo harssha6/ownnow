@@ -38,9 +38,12 @@ export function countable(req: Request): boolean {
     ].some((s) => ua.includes(s))
   )
     return false;
-  return ["", "empty", "document", "iframe"].includes(
-    req.headers.get("Sec-Fetch-Dest") ?? "",
-  );
+  const dest = req.headers.get("Sec-Fetch-Dest") ?? "";
+  if (dest === "" || dest === "empty") {
+    const mode = req.headers.get("Sec-Fetch-Mode") ?? "";
+    return mode === "" || mode === "navigate";
+  }
+  return ["document", "iframe"].includes(dest);
 }
 async function hmac(
   key: Uint8Array<ArrayBuffer>,
@@ -63,6 +66,7 @@ export async function reportHit(
   slug: string,
   rest: string,
   res: Response,
+  siteCreatedAt: string,
 ): Promise<void> {
   if (
     env.COUNTING === "false" ||
@@ -103,6 +107,7 @@ export async function reportHit(
       },
       body: JSON.stringify({
         date,
+        siteCreatedAt,
         visitorHash: [...hash]
           .map((b) => b.toString(16).padStart(2, "0"))
           .join(""),
@@ -236,4 +241,12 @@ export async function injectAnalytics(
     status: res.status,
     headers,
   });
+}
+
+export function revalidateForStats(contentType: string): boolean {
+  const ct = contentType.split(";")[0].trim().toLowerCase();
+  return !ct.startsWith("font/") && ![
+    "text/css", "text/javascript", "application/javascript", "application/json",
+    "application/wasm", "application/font-woff", "application/vnd.ms-fontobject",
+  ].includes(ct);
 }

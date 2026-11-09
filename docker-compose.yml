@@ -2,6 +2,9 @@
 #   cp .env.example .env   # set OWNNOW_DOMAIN + keys
 #   docker compose up -d
 # Then point your domain's DNS A record at this host.
+# For accurate daily uniques, set OWNNOW_TRUSTED_PROXIES in .env to the actual
+# private Docker network CIDR (docker network inspect <project>_default).
+# Unconfigured forwarded headers produce one generic warning per process.
 services:
   ownnow:
     build: .

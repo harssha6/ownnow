@@ -33,7 +33,9 @@ self-hosted Umami collector. The independent server counter also starts writing
 new daily JSON rollups into the existing S3/R2 store when the new binary is
 deployed; it is explicitly enabled here. It counts direct non-HTML file opens,
 which the Umami script cannot see. There is no historical backfill. The stats
-API stays authenticated. Browser files revalidate while server counting is on.
+API stays authenticated. Documents, images and downloads revalidate while server counting is on;
+CSS/JS/fonts/JSON retain normal caching. Counts are batched off the serving
+path and can be lost during overload, storage failure or abrupt termination.
 
 `OWNNOW_TRUSTED_PROXIES=172.21.0.0/16` trusts the current private
 `ownnow-deploy_default` Docker network so the counter can derive the real

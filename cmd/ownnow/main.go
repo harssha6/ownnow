@@ -24,9 +24,12 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"ownnow/internal/server"
 	"ownnow/internal/store"
@@ -246,8 +249,30 @@ func serve() error {
 	if os.Getenv("OWNNOW_API_KEY") == "" {
 		fmt.Println("warning: OWNNOW_API_KEY unset — local-dev mode, anyone can publish/mutate")
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	httpServer := &http.Server{Addr: addr, Handler: srv}
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-ctx.Done()
+		deadline, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(deadline)
+	}()
 	fmt.Println("ownnow listening on", addr)
-	return http.ListenAndServe(addr, srv)
+	err = httpServer.ListenAndServe()
+	stop()
+	<-shutdownDone
+	deadline, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if flushErr := srv.CloseStats(deadline); flushErr != nil {
+		return fmt.Errorf("flush stats on shutdown: %w", flushErr)
+	}
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 // ---------- client ----------
