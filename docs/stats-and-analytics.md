@@ -5,7 +5,8 @@ local disk or S3/R2 storage. It counts successful GETs (200, 206 and 304),
 including PDF, image and download opens. `views` includes both HTML views and
 file opens; `fileOpens` is the non-HTML subset. Browser subresource requests
 (images embedded in a page, CSS, JS, fonts) are excluded using `Sec-Fetch-Dest`.
-Direct file navigation is counted. A download using several Range requests
+Direct file navigation is counted. Browser fetch/XHR requests with a CORS or
+same-origin fetch mode are excluded, including `Sec-Fetch-Dest: empty`. A download using several Range requests
 counts each request; these are opens/requests, not completed downloads.
 
 HEADs, errors, password prompts, expired sites, obvious bot user agents, empty
@@ -25,7 +26,11 @@ The CLI prints the same JSON as the API. `days` defaults to 7, accepts 1–365,
 and includes today. Daily buckets use **UTC**, oldest first, with zero-filled
 missing dates. `uniqueVisitors` deduplicates a daily salted HMAC-SHA256 of
 IP + User-Agent, scoped to the publish. Period totals **sum daily uniques**;
-the same person on two days counts twice. No cross-day identity is retained.
+the same person on two days counts twice. Hashes differ by day and publish.
+These are pseudonymous identifiers, not irreversible anonymization: an operator
+with the instance secret can test guessed IP/User-Agent pairs for any past day.
+The fallback secret is stored in the same private metadata store as the rollups;
+keep all of `_meta/` private.
 
 ```json
 {
@@ -51,11 +56,18 @@ credentials. Missing/invalid referrers are omitted, not stored as a host.
 
 **What is stored:** daily counts, per-day hashed visitor membership for exact
 deduplication, referrer-host counts and path counts under
-`_meta/stats/<slug>/<UTC-date>/<writer>.json` in the existing store. Each server
-writes a separate daily shard, and reads merge them without double-counting
-daily visitors. Path/referrer maps keep up to 1,000 distinct entries per shard;
-additional values fold into `(other)`. Hash membership grows with daily unique
-visitors. There are no individual event records or request timestamps. **Raw
+`_meta/stats/<slug>/<publish-generation>/<UTC-date>/<writer-shard>.json`
+in the existing store. Each server
+writes separate daily shards, and reads merge them without double-counting
+daily visitors. A shard holds at most 1,024 visitor hashes, then rotates; exact
+uniques come from the union of all daily shards. At most 32 shards are active
+in memory. Path/referrer maps keep 1,000 entries plus an `(other)` bucket per
+shard. Historical storage and authenticated stats scans grow with traffic.
+The generation namespace prevents delayed writes for a deleted publish from
+appearing in a replacement that reuses its slug. On multiple replicas, a write
+already in progress during deletion may leave an inaccessible old-generation
+object; storage lifecycle rules can remove such remnants. There are no
+individual event records or request timestamps. **Raw
 IPs, raw user agents, cookies, full referrer URLs and query strings are never
 stored by this counter.** There are no analytics cookies or external calls by
 default. Existing proxy/access logs are separate and operator-controlled.
@@ -68,17 +80,23 @@ binary mode persists an automatically generated fallback in
 `_meta/instance-secret`; initialize once before starting multiple replicas,
 or explicitly configure the same secret. Changing the secret during a day
 can increase that day's uniques. Store failures log a generic warning and
-leave serving available; failed writes are not counted.
+leave serving available. Public serving enqueues sanitized hits without waiting
+for storage. A bounded 1,024-hit queue drops new hits when full. A background
+writer batches counts, normally flushing every second or after 256 hits.
+Abrupt process termination, queue overload or storage failure can lose counts;
+this counter is best effort. Graceful SIGINT/SIGTERM drains the local queue.
+The stats API flushes accepted local hits before reading; other replicas may
+still have unflushed hits.
 
 Set `OWNNOW_COUNTING=false` to stop new counts; historical stats remain readable.
 Unset `OWNNOW_CONFIG` or remove its `analytics` block to disable injection
 instance-wide. `--no-analytics` disables injection for one publish, while
 `--analytics` re-enables it. Those flags never disable built-in counting.
-While counting is on, browsers revalidate site files (`private, no-cache`) so
-repeat opens reach the server; conditional 304 requests count too. For large
-traffic volumes, account for one rollup read/write per counted request and
-rollup scans for stats queries. This is a small-instance counter, not a data
-warehouse.
+While counting is on, browsers revalidate documents, images and downloads
+(`private, no-cache`) so repeat opens reach the server; conditional 304 requests
+count too. CSS, JavaScript, fonts, JSON and Wasm retain their normal asset cache
+headers. Each dirty batch writes bounded rollups; authenticated stats queries
+scan history. This is a small-instance counter, not a data warehouse.
 
 **Behind a proxy:** forwarded headers are ignored by default. Set
 `OWNNOW_TRUSTED_PROXIES` to comma-separated proxy CIDRs, for example
@@ -87,7 +105,11 @@ the actual private Docker network CIDR. The server walks `X-Forwarded-For`
 from the trusted peer toward the client, stopping at the first untrusted IP.
 Trust only your proxy networks and ensure they append/overwrite forwarded
 headers. Otherwise all visitors can appear as the proxy, or clients can spoof
-identities. No forwarded IP is stored.
+identities. An untrusted `X-Forwarded-For` header logs one generic configuration
+warning per process, without request details. **The default Docker/Caddy setup
+also needs `OWNNOW_TRUSTED_PROXIES` set in `.env` to its actual private network
+CIDR**; inspect it with `docker network inspect <project>_default`. We do not
+reserve a fixed subnet or trust all private addresses. No forwarded IP is stored.
 
 ### Optional tracker injection
 
@@ -147,8 +169,8 @@ it, keep a Go instance running against the same R2 bucket and configure:
   `STATS_SECRET` matching `OWNNOW_SECRET`, set with `bunx wrangler secret put`.
 
 The Worker filters requests, hashes the Cloudflare-provided client IP locally,
-and asynchronously sends only the daily hash, path, referrer host and file
-flag to `POST /api/v1/publishes/<slug>/stats/edge`. Raw IPs and UAs never cross
+and asynchronously sends only the daily hash, path, referrer host, file
+flag and publish creation time (generation) to `POST /api/v1/publishes/<slug>/stats/edge`. Raw IPs and UAs never cross
 the bridge. Edge cache hits also count. Failed reports are not retried, so an
 unreachable Go instance can undercount. Without the bridge, the Worker serves
 normally and cannot add built-in counts. `COUNTING="false"` disables Worker

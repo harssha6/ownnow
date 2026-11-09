@@ -135,6 +135,9 @@ and publish-relative path counts. The counter stores **no raw IPs, raw user
 agents, cookies, query strings, full referrer URLs, individual events or request
 timestamps**. Daily buckets use UTC; period uniques sum daily uniques. Rollups
 remain until site deletion, manual removal or an object-store lifecycle rule.
+Hashes are pseudonymous: the instance secret lets an operator test guessed
+IP/User-Agent pairs, so keep `_meta/` private. Counts are batched in a bounded
+background queue; overload, storage failure or abrupt termination can lose hits.
 Existing proxy access logs are separate from these counters.
 
 Set `OWNNOW_COUNTING=false` to stop new counts; history remains readable.

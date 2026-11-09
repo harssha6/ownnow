@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
+	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
@@ -26,7 +29,8 @@ func statsFixture(t *testing.T, change func(*Config)) (*Server, *store.Local) {
 		change(&cfg)
 	}
 	s := New(cfg)
-	site := &Site{Slug: "report", Current: "v1", ClaimHash: hashStr("claim-report"), Versions: []Version{{ID: "v1", Files: []FileEntry{{Path: "index.html", ContentType: "text/html"}, {Path: "report.pdf", ContentType: "application/pdf"}, {Path: "image.png", ContentType: "image/png"}}}}}
+	t.Cleanup(func() { _ = s.CloseStats(context.Background()) })
+	site := &Site{Slug: "report", CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Current: "v1", ClaimHash: hashStr("claim-report"), Versions: []Version{{ID: "v1", Files: []FileEntry{{Path: "index.html", ContentType: "text/html"}, {Path: "report.pdf", ContentType: "application/pdf"}, {Path: "image.png", ContentType: "image/png"}}}}}
 	if err := s.saveSite(httptest.NewRequest("GET", "/", nil), site); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +106,7 @@ func TestCountsHTMLPDFAndImages(t *testing.T) {
 func TestFilteringAndStatus(t *testing.T) {
 	s, _ := statsFixture(t, nil)
 	for _, headers := range []map[string]string{
-		{"User-Agent": "Googlebot/2.1"}, {"User-Agent": "facebookexternalhit/1"}, {"User-Agent": ""}, {"User-Agent": "curl/8.0"}, {"Accept": ""}, {"DNT": "1"}, {"Sec-GPC": "1"}, {"Sec-Fetch-Dest": "image"}, {"Sec-Fetch-Dest": "script"},
+		{"User-Agent": "Googlebot/2.1"}, {"User-Agent": "facebookexternalhit/1"}, {"User-Agent": ""}, {"User-Agent": "curl/8.0"}, {"Accept": ""}, {"DNT": "1"}, {"Sec-GPC": "1"}, {"Sec-Fetch-Dest": "image"}, {"Sec-Fetch-Dest": "script"}, {"Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors"}, {"Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "same-origin"},
 	} {
 		statsRequest(s, "GET", "/report/", headers)
 	}
@@ -134,16 +138,15 @@ func TestDailyRollupsAndRestartMerge(t *testing.T) {
 	if a == b || a == s.visitorHash(today, "different", "203.0.113.5", "Browser") {
 		t.Fatal("hash must rotate per day and publish")
 	}
-	if err := s.record(context.Background(), "report", yesterday, b, "/", "", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.record(context.Background(), "report", today, a, "/", "", false); err != nil {
+	generation := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.enqueueStats(statsHit{slug: "report", generation: generation, day: yesterday, visitor: b, path: "/"})
+	s.enqueueStats(statsHit{slug: "report", generation: generation, day: today, visitor: a, path: "/"})
+	if err := s.CloseStats(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	restarted := New(Config{Store: st, APIKey: "test-key", Secret: s.cfg.Secret})
-	if err := restarted.record(context.Background(), "report", today, a, "/file.pdf", "example.com", true); err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() { _ = restarted.CloseStats(context.Background()) })
+	restarted.enqueueStats(statsHit{slug: "report", generation: generation, day: today, visitor: a, path: "/file.pdf", referrer: "example.com", file: true})
 	got := readStats(t, restarted, "2")
 	if got.Totals != (StatsCounts{Views: 3, UniqueVisitors: 2, FileOpens: 1}) || got.Series[1].UniqueVisitors != 1 {
 		t.Fatalf("merge: %+v", got)
@@ -226,7 +229,7 @@ func TestTrustedProxyIP(t *testing.T) {
 }
 func TestEdgeIngest(t *testing.T) {
 	s, _ := statsFixture(t, func(c *Config) { c.EdgeStatsKey = "edge-key" })
-	hit := edgeHit{Date: time.Now().UTC().Format(time.DateOnly), VisitorHash: strings.Repeat("ab", 32), Path: "/report.pdf", Referrer: "example.com", File: true}
+	hit := edgeHit{SiteCreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Date: time.Now().UTC().Format(time.DateOnly), VisitorHash: strings.Repeat("ab", 32), Path: "/report.pdf", Referrer: "example.com", File: true}
 	send := func(hit edgeHit, key string) int {
 		b, _ := json.Marshal(hit)
 		r := httptest.NewRequest("POST", "/api/v1/publishes/report/stats/edge", bytes.NewReader(b))
@@ -250,5 +253,158 @@ func TestEdgeIngest(t *testing.T) {
 	}
 	if got := readStats(t, s, "1").Totals; got != (StatsCounts{Views: 1, UniqueVisitors: 1, FileOpens: 1}) {
 		t.Fatal(got)
+	}
+}
+
+// Pause after response writing but before the handler can record its hit.
+type pausedStatsResponse struct {
+	*httptest.ResponseRecorder
+	written chan struct{}
+	release chan struct{}
+}
+
+func (w *pausedStatsResponse) Write(p []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(p)
+	close(w.written)
+	<-w.release
+	return n, err
+}
+func TestDeletedPublishDoesNotRegainInflightStats(t *testing.T) {
+	s, st := statsFixture(t, nil)
+	w := &pausedStatsResponse{httptest.NewRecorder(), make(chan struct{}), make(chan struct{})}
+	r := httptest.NewRequest("GET", "/report/", nil)
+	r.Header.Set("User-Agent", "Mozilla/5.0")
+	r.Header.Set("Accept", "text/html")
+	done := make(chan struct{})
+	go func() { defer close(done); s.ServeHTTP(w, r) }()
+	<-w.written
+	deleted := statsRequest(s, "DELETE", "/api/v1/publish/report", map[string]string{"Authorization": "Bearer test-key"})
+	if deleted.Code != 200 {
+		t.Fatal(deleted.Code)
+	}
+	close(w.release)
+	<-done
+	// The recreated slug must not inherit even an already queued old hit.
+	replacement := &Site{Slug: "report", CreatedAt: time.Now().UTC(), Current: "v2"}
+	if err := s.saveSite(httptest.NewRequest("GET", "/", nil), replacement); err != nil {
+		t.Fatal(err)
+	}
+	if got := readStats(t, s, "1").Totals.Views; got != 0 {
+		t.Fatalf("replacement inherited %d old views", got)
+	}
+	objs, _ := st.List(context.Background(), "_meta/stats/report/")
+	if len(objs) != 0 {
+		t.Fatalf("deleted stats recreated: %v", objs)
+	}
+}
+func TestServingDoesNotWaitForStatsStorage(t *testing.T) {
+	s, _ := statsFixture(t, nil)
+	s.statsMu.Lock()
+	done := make(chan int, 1)
+	go func() { done <- statsRequest(s, http.MethodGet, "/report/", nil).Code }()
+	select {
+	case code := <-done:
+		s.statsMu.Unlock()
+		if code != 200 {
+			t.Fatal(code)
+		}
+	case <-time.After(2 * time.Second):
+		s.statsMu.Unlock()
+		<-done
+		t.Fatal("page serving waited on analytics storage lock")
+	}
+}
+
+func TestBoundedShardsKeepExactDailyUniques(t *testing.T) {
+	s, st := statsFixture(t, nil)
+	day := time.Now().UTC().Format(time.DateOnly)
+	for i := 0; i < 10000; i++ {
+		// Feed at bounded batch boundaries so this tests accepted hits, not overload.
+		if !s.enqueueStats(statsHit{slug: "report", generation: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), day: day, visitor: fmt.Sprintf("%064d", i), path: "/"}) {
+			t.Fatal("queue unexpectedly full")
+		}
+		if i%128 == 127 {
+			if err := s.syncStats(context.Background(), false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	out := readStats(t, s, "1")
+	if out.Totals.Views != 10000 || out.Totals.UniqueVisitors != 10000 {
+		t.Fatal(out.Totals)
+	}
+	objects, err := st.List(context.Background(), "_meta/stats/")
+	if err != nil || len(objects) != 10 {
+		t.Fatalf("rotated shards: %d %v", len(objects), err)
+	}
+	for _, object := range objects {
+		roll, err := s.readRollup(context.Background(), object.Key)
+		if err != nil || len(roll.Visitors) > statsShardVisitors {
+			t.Fatalf("unbounded shard: %d %v", len(roll.Visitors), err)
+		}
+	}
+}
+func TestWebAssetCaching(t *testing.T) {
+	s, st := statsFixture(t, nil)
+	r := httptest.NewRequest("GET", "/", nil)
+	site, err := s.loadSite(r, "report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []FileEntry{{Path: "style.css", ContentType: "text/css"}, {Path: "app.js", ContentType: "text/javascript"}, {Path: "data.json", ContentType: "application/json"}, {Path: "font.woff2", ContentType: "font/woff2"}, {Path: "app.wasm", ContentType: "application/wasm"}} {
+		if err := st.Put(context.Background(), s.fileKey("report", "v1", f.Path), strings.NewReader("file"), 4, f.ContentType); err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		s.serveFile(w, r, site, "v1", f)
+		expected := "public, max-age=60"
+		if f.Path == "app.wasm" {
+			expected = "no-cache"
+		}
+		if got := w.Header().Get("Cache-Control"); got != expected {
+			t.Fatalf("%s cache %q", f.Path, got)
+		}
+	}
+}
+func TestQueueOverloadDoesNotBlockServing(t *testing.T) {
+	s, _ := statsFixture(t, nil)
+	// While the writer is blocked on storage, 10k arrivals must stay bounded.
+	s.statsMu.Lock()
+	accepted := 0
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 10000; i++ {
+			if s.enqueueStats(statsHit{slug: "report", day: "2026-01-01", visitor: fmt.Sprint(i), path: "/"}) {
+				accepted++
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		s.statsMu.Unlock()
+		<-done
+		t.Fatal("full stats queue blocked enqueue")
+	}
+	s.statsMu.Unlock()
+	if accepted > statsQueueSize+statsBatchSize {
+		t.Fatalf("unbounded queue: %d", accepted)
+	}
+}
+
+func TestUntrustedForwardedIPWarnsWithoutLeakingAddress(t *testing.T) {
+	s, _ := statsFixture(t, nil)
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	r := httptest.NewRequest("GET", "/report/", nil)
+	r.RemoteAddr = "127.0.0.1:1234"
+	r.Header.Set("X-Forwarded-For", "203.0.113.123")
+	s.clientIP(r)
+	s.clientIP(r)
+	if strings.Count(output.String(), "OWNNOW_TRUSTED_PROXIES") != 1 || strings.Contains(output.String(), "203.0.113.123") || strings.Contains(output.String(), "127.0.0.1") {
+		t.Fatal(output.String())
 	}
 }

@@ -1,4 +1,4 @@
-import { reportHit, injectAnalytics, type StatsEnv } from "./analytics";
+import { reportHit, injectAnalytics, revalidateForStats, type StatsEnv } from "./analytics";
 
 /**
  * ownnow edge Worker — the ONLY public serving path. Files are served from
@@ -19,6 +19,7 @@ export interface Env extends StatsEnv {
 
 type SiteMeta = {
   slug: string;
+  createdAt: string;
   currentVersion?: string;
   spa?: boolean;
   crossOriginIsolation?: boolean;
@@ -32,6 +33,7 @@ const MIME: Record<string, string> = {
   html: "text/html; charset=utf-8", css: "text/css", js: "text/javascript", mjs: "text/javascript",
   json: "application/json", wasm: "application/wasm", png: "image/png", jpg: "image/jpeg",
   svg: "image/svg+xml", pdf: "application/pdf", txt: "text/plain; charset=utf-8", md: "text/markdown",
+  woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
 };
 
 function contentType(path: string): string {
@@ -103,10 +105,10 @@ export default {
     if (req.method === "POST") return new Response("method not allowed", { status: 405 });
 
     const finish = async (res: Response): Promise<Response> => {
-      ctx.waitUntil(reportHit(req,env,slug,rest,res));
+      ctx.waitUntil(reportHit(req, env, slug, rest, res, site.createdAt));
       const injected = await injectAnalytics(res,req,env,site.noAnalytics);
       const result = new Response(injected.body, injected);
-      if (env.COUNTING !== "false") result.headers.set("Cache-Control", "private, no-cache");
+      if (env.COUNTING !== "false" && revalidateForStats(result.headers.get("Content-Type") ?? "")) result.headers.set("Cache-Control", "private, no-cache");
       return result;
     };
 

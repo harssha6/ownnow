@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ownnow/internal/store"
@@ -81,11 +82,16 @@ type Config struct {
 }
 
 type Server struct {
-	cfg         Config
-	mux         *http.ServeMux
-	idx         indexCache
-	statsMu     sync.Mutex
-	statsWriter string
+	cfg          Config
+	mux          *http.ServeMux
+	idx          indexCache
+	statsMu      sync.Mutex
+	statsWriter  string
+	statsOnce    sync.Once
+	statsQueue   chan statsCommand
+	statsDone    chan struct{}
+	statsClosed  atomic.Bool
+	proxyWarning sync.Once
 }
 
 func New(cfg Config) *Server {
@@ -94,7 +100,7 @@ func New(cfg Config) *Server {
 		_, _ = rand.Read(b)
 		cfg.Secret = b
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), statsWriter: randID("writer_")}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), statsWriter: randID("writer_"), statsQueue: make(chan statsCommand, statsQueueSize), statsDone: make(chan struct{})}
 	s.routes()
 	return s
 }
@@ -726,7 +732,7 @@ func (s *Server) serveSite(w http.ResponseWriter, r *http.Request) {
 		}
 		// no index at all -> directory listing (here.now does this for file bundles)
 		s.listing(w, r, site, cur)
-		s.countRequest(r, slug, false)
+		s.countRequest(r, site, false)
 		return
 	}
 	if site.SPA {
@@ -805,14 +811,14 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, site *Site, v
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=60")
 	}
-	if !s.cfg.DisableCounting {
+	if !s.cfg.DisableCounting && revalidateForStats(ct) {
 		w.Header().Set("Cache-Control", "private, no-cache")
 	}
 	w.Header().Set("ETag", `"`+hashStr(string(data))[:16]+`"`)
 	cw := &statsStatusWriter{ResponseWriter: w, status: 200}
 	http.ServeContent(cw, r, f.Path, time.Time{}, strings.NewReader(string(data))) // gives Range support
 	if cw.status == 200 || cw.status == 206 || cw.status == 304 {
-		s.countRequest(r, site.Slug, !isHTML)
+		s.countRequest(r, site, !isHTML)
 	}
 }
 

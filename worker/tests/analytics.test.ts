@@ -18,6 +18,8 @@ test("bot, privacy and subresource filtering", () => {
     { DNT: "1" },
     { "Sec-GPC": "1" },
     { "Sec-Fetch-Dest": "image" },
+    { "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors" },
+    { "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "same-origin" },
   ])
     expect(countable(req(headers))).toBe(false);
 });
@@ -51,6 +53,7 @@ test("bridge sends a daily hash and sanitized fields, without IP/UA", async () =
       "report",
       "report.pdf",
       new Response("PDF", { headers: { "Content-Type": "application/pdf" } }),
+      "2026-01-01T00:00:00Z",
     );
     expect(payload.path).toBe("/report.pdf");
     expect(payload.referrer).toBe("news.example");
@@ -61,6 +64,7 @@ test("bridge sends a daily hash and sanitized fields, without IP/UA", async () =
       "file",
       "path",
       "referrer",
+      "siteCreatedAt",
       "visitorHash",
     ]);
     const first = payload.visitorHash;
@@ -70,6 +74,7 @@ test("bridge sends a daily hash and sanitized fields, without IP/UA", async () =
       "report",
       "report.pdf",
       new Response("PDF", { headers: { "Content-Type": "application/pdf" } }),
+      "2026-01-01T00:00:00Z",
     );
     expect(payload.visitorHash).toBe(first);
     expect(JSON.stringify(payload).includes("203.0.113.9")).toBe(false);
@@ -128,10 +133,13 @@ test("Worker runtime injects once, skips existing and opted-out trackers, serves
   ] as const) {
     await bucket.put(
       `_meta/sites/${slug}.json`,
-      JSON.stringify({ slug, currentVersion: "v1", noAnalytics }),
+      JSON.stringify({ slug, createdAt: "2026-01-01T00:00:00Z", currentVersion: "v1", noAnalytics }),
     );
     await bucket.put(`sites/${slug}/v1/index.html`, body);
     await bucket.put(`sites/${slug}/v1/report.pdf`, "%PDF-1.4 Test PDF");
+    await bucket.put(`sites/${slug}/v1/style.css`, "body{}");
+    await bucket.put(`sites/${slug}/v1/font.woff2`, "font");
+    await bucket.put(`sites/${slug}/v1/data.json`, "{}");
   }
   for (let i = 0; i < 2; i++) {
     const res = await runtimeFetch("https://pages.example/report/", {
@@ -153,6 +161,11 @@ test("Worker runtime injects once, skips existing and opted-out trackers, serves
       headers,
     });
     expect((await res.text()).includes("data-ownnow-analytics")).toBe(false);
+  }
+for (const path of ["style.css", "font.woff2", "data.json"]) {
+    const asset = await runtimeFetch("https://pages.example/report/" + path, { headers: normalHeaders });
+    expect(asset.headers.get("Cache-Control")).toBe("public, max-age=60");
+    await asset.body?.cancel();
   }
   const pdf = await runtimeFetch("https://pages.example/report/report.pdf", {
     headers: normalHeaders,

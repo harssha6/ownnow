@@ -111,6 +111,11 @@ noindex is not privacy. Link previews still render, and anyone with the URL
 can open the page. Use `--password` for that (a locked page shows no preview).
 ## Stats and analytics
 
+Counts are best effort: the bounded background queue can drop hits during
+overload, storage failure or abrupt shutdown. The stats API flushes local
+accepted hits before reading. Daily hashes are pseudonymous; someone with the
+instance secret can test guessed IP/User-Agent pairs. Keep `_meta/` private.
+
 Built-in server counting is on by default and includes direct PDF, image and
 download opens. It stores daily rollups in the instance's existing storage:
 counts, daily salted hashes of IP + User-Agent for exact deduplication,
